@@ -1,0 +1,7 @@
+pybullet==3.2.7
+fastapi==0.141.1
+uvicorn==0.52.1
+httpx[socks]==0.28.1
+Pillow>=10,<13
+numpy>=2,<3
+pytest>=8,<10

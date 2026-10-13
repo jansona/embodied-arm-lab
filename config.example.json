@@ -1,0 +1,8 @@
+{
+  "provider": "aliyun_bailian",
+  "endpoint": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone",
+  "model": "decision-model-preview",
+  "api_key": "",
+  "min_confidence": 0.65,
+  "timeout": 15
+}

@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+*.log
+config.local.json
+.venv311/
+.python/
+
+.runtime/
+
+# Local credentials, environments and generated runtime evidence
+.venv*/
+*.pem
+*.key
+jev-arm-config.json
+config.json
+*-config.local.json
+*.zip
+*.tar.gz
+.DS_Store
+
+# Generated experiment records stay local
+artifacts/

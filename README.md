@@ -99,3 +99,9 @@ Important artifacts:
 Cold request latency includes connection/proxy/TLS setup. Reused-client warm requests have often been roughly0.5–1second in these trials; this is observed end-to-end latency, not guaranteed model inference time. A provider `latency_ms` field is retained separately and is not assumed to cover the entire request.
 
 Main modules: `brain.py`, `brain_ipc.py`, `brain_worker.py`, `microcontrol_experiment.py`, `inference_worker.py`, `ipc.py`, `sequence_executor.py`, `stack_plans.py`, `task_executor.py`, `control.py`, `simulator.py`, `app.py`, and `static/`.
+
+## Source-only publication
+
+Historical demonstration artifacts referenced above are retained separately and are not included in this source-only repository. Runtime/session records, credentials, and private configuration are excluded. The Panda v3 baseline remains available on `baseline/panda-v3`; SO101 work is separately labelled experimental.
+
+Publication excludes these legacy runtime replay/audit packaging utilities: `gripper_context_replay.py`, `microcontrol_context_replay.py`, `microcontrol_hold_audit.py`, `package_project.py`. The offline tests do not depend on them.
