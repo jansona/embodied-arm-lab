@@ -2,14 +2,20 @@
 
 CPU-only robotics sandbox with a browser view, a Qwen conversation planner, and a Jev micro-action controller. The user-selected models are Alibaba Cloud Bailian `qwen3.8-max` and `decision-model-preview`.
 
-## What has actually been verified
+## Published scope
+
+This public checkout contains the Panda v3 source baseline only. The baseline source checkpoint is preserved on `baseline/panda-v3`. The experimental SO101 v4 implementation has not been published here.
+
+Historical experiment records, runtime/session artifacts, credentials and private configuration are not included. The results below summarize prior development trials; this checkout does not contain their original evidence or reproduce those sessions automatically.
+
+## Historical development results
 
 - Real Qwen understood a red-block pick, a pronoun-based placement follow-up, and an unknown-object clarification
 - Real Jev completed a physical red-block pick: 37 requests, 36 applied actions, block lifted to about25.8cm; the already accepted Qwen plan was reused for that recovery
 - Qwen generated an abstract stacking plan: pick red → place red in the goal area → pick blue → place blue on red
 - Earlier stacking attempts stopped visibly on a gripper-confidence rejection and then on measured grasp drift. The former was corrected with clearer exclusive transition criteria. The latter exposed a missing Panda finger mimic linkage
 - The corrected robot-only finger gear linkage reduced held-block drift from8.65mm/12 simulated seconds to0.0067mm/30 seconds. Both stacking orders pass deterministic physical regression tests
-- Full real Qwen-plan/Jev stacking replay passed:167 Jev requests,165 applied actions, all four symbolic steps physically verified. Blue was released on red with0.375mm relative horizontal error and0.025mm support displacement. The original accepted Qwen plan was reused with zero additional brain calls; see `artifacts/qwen-jev-stack-success.json`
+- Full real Qwen-plan/Jev stacking replay passed:167 Jev requests,165 applied actions, all four symbolic steps physically verified. Blue was released on red with0.375mm relative horizontal error and0.025mm support displacement. The original accepted Qwen plan was reused with zero additional brain calls
 
 Recorded outcomes are bounded demonstrations, not general reliability estimates. The scripted/mock modes are explicitly labelled and never silently replace a failed model call.
 
@@ -55,7 +61,7 @@ Approved managed-network execution environment, separate terminals:
 
 For an ordinary computer where the browser and API networking share one environment, run `./run-session.sh` to launch the UI and both bounded workers with one command. In this cloud split, keep the visible desktop server and run `./run-session.sh --workers-only` in the approved managed-network environment. The launcher sends no request until an explicit UI task and never renews a window automatically.
 
-Then select live Qwen and Jev in the UI, load the server configuration and submit a task. Workers terminate at their explicit call/time budgets; they do not restart automatically. The offline mock brain uses no API and is visibly labelled. Normal dialogue sequences and the one-use replay use the explicitly shown200-request/420-second Jev preset. Stop still cancels immediately; limits are maximums, not promised usage.
+Then select live Qwen and Jev in the UI, load the server configuration and submit a task. Workers terminate at their explicit call/time budgets; they do not restart automatically. The offline mock brain uses no API and is visibly labelled. Normal dialogue sequences use the explicitly shown200-request/420-second Jev preset. Stop still cancels immediately; limits are maximums, not promised usage.
 
 ## Credentials and provider
 
@@ -77,7 +83,7 @@ PyBullet DIRECT, CPU TinyRenderer, bundled Franka Panda assets, fixed240Hz simul
 
 Controller movement is at most2cm per accepted micro-action, capped at remaining target distance. Joint/workspace/finite-value checks and nonprogress rejection remain independent of model confidence. A deterministic terminal tolerance check stops finished waypoints before requesting another move; this is not attributed to a Jev hold answer. Pause/reset/stop generations reject stale decisions. These checks are not a full collision planner or real-robot safety certification.
 
-The continuation utilities are narrow, provenance-checked experiment recovery tools. They require exact saved-plan/checkpoint evidence and reject changed scenes; they are not generic remote-control proxies. Browser actuator-origin metadata on the old in-place continuation path remains `manual`; its separate audit records each actual Jev decision and reused-Qwen provenance explicitly.
+The continuation utilities are narrow, provenance-checked experiment recovery tools. They require exact saved-plan/checkpoint evidence and reject changed scenes; they are not generic remote-control proxies. The historical checkpoints and audit records required to replay the original sessions are not included in this repository.
 
 ## Tests and evidence
 
@@ -88,13 +94,7 @@ The continuation utilities are narrow, provenance-checked experiment recovery to
 
 Tests cover provider schemas/errors, cancelled and stale responses, private IPC validation, bounded worker budgets, physical pick/place/stack, finger stability, conversation plans and recovery guards. They use mocked API transport unless a script is explicitly described as a live diagnostic. Do not run live scripts merely to run the offline test suite.
 
-Important artifacts:
-- `qwen-jev-pick-success-summary.json`: real Jev pick decisions
-- `qwen-jev-stack-first-summary.json`: interrupted first abstract stack attempt
-- `gripper-context-replay.json`: no-motion repaired gripper decision
-- `stack-continuation-audit.json`: original-scene continuation and measured outcomes
-- `blue-grasp-settling*.json`: observed pre-fix grasp drift
-- finger-stability diagnostics and subsequent live replay evidence
+Historical pick/stack summaries, gripper diagnostics and continuation audits are excluded. The offline tests use their own generated or mocked inputs; running `evaluate.py` creates a new local evaluation report rather than restoring historical trial evidence.
 
 Cold request latency includes connection/proxy/TLS setup. Reused-client warm requests have often been roughly0.5–1second in these trials; this is observed end-to-end latency, not guaranteed model inference time. A provider `latency_ms` field is retained separately and is not assumed to cover the entire request.
 
@@ -102,6 +102,6 @@ Main modules: `brain.py`, `brain_ipc.py`, `brain_worker.py`, `microcontrol_exper
 
 ## Source-only publication
 
-Historical demonstration artifacts referenced above are retained separately and are not included in this source-only repository. Runtime/session records, credentials, and private configuration are excluded. The Panda v3 baseline remains available on `baseline/panda-v3`; SO101 work is separately labelled experimental.
+Only the Panda v3 source baseline is published. Historical demonstration evidence, runtime/session records, credentials and private configuration are excluded. SO101 v4 publication remains pending.
 
 Publication excludes these legacy runtime replay/audit packaging utilities: `gripper_context_replay.py`, `microcontrol_context_replay.py`, `microcontrol_hold_audit.py`, `package_project.py`. The offline tests do not depend on them.
