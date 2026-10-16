@@ -58,6 +58,12 @@ SO101的Jev不接收整段自由文本计划，不一次生成完整轨迹，不
 抓取完成须有新鲜时序观测证明物体随夹爪提升；放置须观测释放后物体到达目标并稳定，
 夹爪闭合、Jev的hold、局部坐标到达或计划通过校验都不等于任务成功。
 execution_feedback.cycle_context描述已执行微动作、剩余总预算、阶段、残差和已验证持有状态。
+其可选progress提供各阶段的新鲜RGB物体位置与FK残差首末值、局部目标首末值、观测次数；
+由你判断实际进展，而不是机械地因额度用完就继续。仅在同一phase、同一局部目标下比较误差，
+目标改变时必须区分目标移动与机械臂进展，不能把不同阶段的误差直接比较。
+残差缩小不等于抓取或放置完成；结合物体移动、当前观察和验证状态决定继续、修订或clarify。
+progress缺失或仅一次观测时不要臆造趋势。scene.robot_state提供当前五关节、夹爪开度和持有验证状态；
+Stop后这些是当前状态，不是假设的初始姿态；夹爪闭合不能把unknown变成verified_held。
 cycle_budget表示本轮小脑额度用完后暂停，应基于重新观察规划剩余目标；不重置总预算，
 不假设回到初始场景，不重复已完成步骤；held_verified=false表示持有状态未知，不能假设抓取成功。
 若cycle_budget暂停在未完成的原语内，可用单个pick/place确认previous_plan中failed_step_id对应的
@@ -172,6 +178,23 @@ def _check_runtime_plan(payload, scene):
             raise ValueError('SO101 requires explicit pick then place')
 
 
+def validate_robot_state(value):
+    """Current encoder/gripper state, with explicitly verified holding status."""
+    if not isinstance(value, dict) or set(value) != {'joints', 'gripper_openness', 'holding_status'}:
+        raise ValueError('Invalid robot state fields')
+    joints = value['joints']
+    if (not isinstance(joints, list) or len(joints) != 5
+            or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) >= 100 for v in joints)):
+        raise ValueError('Invalid robot joints')
+    openness = value['gripper_openness']
+    if type(openness) not in (int, float) or not math.isfinite(openness) or not 0 <= openness <= 1:
+        raise ValueError('Invalid robot gripper openness')
+    status = value['holding_status']
+    if not isinstance(status, str) or status not in ('unknown', 'verified_held', 'verified_empty'):
+        raise ValueError('Invalid robot holding status')
+    return {'joints': list(joints), 'gripper_openness': openness, 'holding_status': status}
+
+
 def scene_snapshot(scene: dict) -> dict:
     """Whitelist numeric simulator fields, excluding logs, keys and arbitrary text."""
     capabilities = None
@@ -179,6 +202,9 @@ def scene_snapshot(scene: dict) -> dict:
         capabilities = validate_runtime_capabilities(scene['runtime_capabilities'])
         scene = {k: v for k, v in scene.items() if k != 'runtime_capabilities'}
     extra = {'runtime_capabilities': capabilities} if capabilities is not None else {}
+    if isinstance(scene, dict) and 'robot_state' in scene:
+        extra['robot_state'] = validate_robot_state(scene['robot_state'])
+        scene = {k: v for k, v in scene.items() if k != 'robot_state'}
     if scene == {'observation_status': 'unavailable', 'blocks': {}}:
         return {**scene, **extra}
     if not isinstance(scene, dict) or not isinstance(scene.get('blocks'), dict):
@@ -209,6 +235,8 @@ def scene_snapshot(scene: dict) -> dict:
         safe['gripper_width'] = width
     held = scene.get('held_object')
     if type(held) is str and held in blocks:
+        if 'robot_state' in extra and extra['robot_state']['holding_status'] != 'verified_held':
+            raise ValueError('Held object requires verified robot holding status')
         safe['held_object'] = held
     return safe
 
@@ -344,11 +372,35 @@ FEEDBACK_REASONS = frozenset(('grasp_failed', 'object_dropped', 'placement_faile
 REPLAN_ERROR_REASONS = frozenset(('replan_budget_exhausted', 'invalid_feedback'))
 
 
+CYCLE_PHASES = ('approach', 'descend', 'preclose', 'close', 'lift', 'verify_lift',
+                'transit', 'lower', 'release', 'retreat', 'verify_release')
+
+
+def validate_cycle_progress(value):
+    """Fresh per-phase numeric evidence, never a precomputed progress verdict."""
+    vectors = ('goal_start_xyz_m', 'goal_end_xyz_m', 'error_start_xyz_m', 'error_end_xyz_m',
+               'object_start_xyz_m', 'object_end_xyz_m')
+    fields = {'phase', 'observations', *vectors}
+    if not isinstance(value, list) or len(value) > 8:
+        raise ValueError('Invalid cycle progress length')
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != fields:
+            raise ValueError('Invalid cycle progress fields')
+        if not isinstance(entry['phase'], str) or entry['phase'] not in CYCLE_PHASES:
+            raise ValueError('Invalid cycle progress phase')
+        if type(entry['observations']) is not int or not 1 <= entry['observations'] <= 1000:
+            raise ValueError('Invalid cycle observation count')
+        for key in vectors:
+            if not _vector(entry[key]) or any(abs(v) > 1 for v in entry[key]):
+                raise ValueError('Invalid cycle progress vector')
+    return json.loads(json.dumps(value, allow_nan=False))
+
+
 def validate_cycle_context(value):
     """Bounded factual pause evidence; no raw model text or arbitrary history."""
     fields = {'cycle_index', 'completed_micro_actions', 'remaining_global_calls', 'held_object',
               'held_verified', 'phase', 'residual_xyz_m', 'stop_reason', 'observation_status', 'recent_actions'}
-    if not isinstance(value, dict) or set(value) != fields:
+    if not isinstance(value, dict) or set(value) not in (fields, fields | {'progress'}):
         raise ValueError('Invalid cycle context fields')
     for key in ('cycle_index', 'completed_micro_actions', 'remaining_global_calls'):
         if type(value[key]) is not int or not 0 <= value[key] <= 200:
@@ -357,8 +409,7 @@ def validate_cycle_context(value):
     if ((held is not None and (not isinstance(held, str) or held not in OBJECT_IDS))
             or type(value['held_verified']) is not bool or (held is not None and not value['held_verified'])):
         raise ValueError('Unverified holding state')
-    enums = {'phase': ('approach', 'descend', 'preclose', 'close', 'lift', 'verify_lift',
-                       'transit', 'lower', 'release', 'retreat', 'verify_release'),
+    enums = {'phase': CYCLE_PHASES,
              'stop_reason': ('cycle_budget', 'scene_changed', 'controller_error'),
              'observation_status': ('fresh', 'unavailable')}
     for key, options in enums.items():
@@ -375,6 +426,8 @@ def validate_cycle_context(value):
                 or action['action'] not in ('x_plus', 'x_minus', 'y_plus', 'y_minus', 'z_plus', 'z_minus', 'open', 'close', 'hold')
                 or type(action['applied']) is not bool):
             raise ValueError('Invalid recent action')
+    if 'progress' in value:
+        validate_cycle_progress(value['progress'])
     return json.loads(json.dumps(value, allow_nan=False))
 
 

@@ -26,6 +26,26 @@ def _valid_recent_actions(actions):
                     and type(item['applied']) is bool for item in actions))
 
 
+def _perception_diagnostic(value):
+    """Only bounded camera-fit metadata; never forward arbitrary provider fields."""
+    if not isinstance(value,dict):return None
+    result={'reason':str(value.get('reason',''))[:80],'fits':[]}
+    for fit in value.get('fits',[])[:6] if isinstance(value.get('fits'),list) else []:
+        if not isinstance(fit,dict) or fit.get('object_id') not in ('red','blue','goal') or fit.get('camera_id') not in ('left','right'):continue
+        item={k:fit[k] for k in ('object_id','camera_id')}
+        if isinstance(fit.get('reason'),str):item['reason']=fit['reason'][:80]
+        for key in ('accepted','search_expanded'):
+            if type(fit.get(key)) is bool:item[key]=fit[key]
+        for key,size in (('roi_bounds',4),('initial_roi_bounds',4),('uv',2),('coarse_uv',2)):
+            values=fit.get(key)
+            if isinstance(values,(list,tuple)) and len(values)==size and all(type(v) in (int,float) and math.isfinite(v) and abs(v)<100000 for v in values):item[key]=list(values)
+        result['fits'].append(item)
+    if isinstance(value.get('landmarks'),list):
+        result['landmarks']=[{'object_id':item['object_id'],'reason':item['reason'][:80]}
+            for item in value['landmarks'][:3] if isinstance(item,dict) and item.get('object_id') in ('red','blue','goal') and isinstance(item.get('reason'),str)]
+    return result
+
+
 def _intent(step):
     return (step['action'], step['object_id'], step['target_id'])
 
@@ -139,6 +159,14 @@ class SequenceExecutionService:
         method = getattr(self.primitive_executor, 'planning_held_object', None)
         return method() if method is not None else None
 
+    def reconcile_observation(self):
+        method=getattr(self.primitive_executor,'reconcile_observation',None)
+        return method() if method is not None else None
+
+    def robot_state(self):
+        method=getattr(self.primitive_executor,'robot_state',None)
+        return method() if method is not None else None
+
     def pause(self):
         return self.primitive_executor.pause()
 
@@ -225,6 +253,7 @@ class SequenceExecutionService:
             raise ValueError('sequence_busy')
         cancel = cancel_event or threading.Event()
         invocation_calls = invocation_actions = 0
+        invocation_progress = []
         current = None
         generation = None
         with self._lock:
@@ -254,10 +283,25 @@ class SequenceExecutionService:
                     'active_step_id': active['step_id'] if active else None,
                     'failed_step_id': active['step_id'] if active and status == 'failed' else None,
                     'phase': current.phase, 'holding_state': current.holding_state,
-                    'recent_actions': deepcopy(current.recent_actions),
+                    'recent_actions': deepcopy(current.recent_actions),'progress':deepcopy(invocation_progress[-8:]),
                     'resume_token': token, 'steps': deepcopy(current.records),
                     'revision': current.revision, 'source': 'primitive_visual_verdicts',
                 }
+                if status in ('failed','cancelled') and current.records:
+                    last=current.records[-1]
+                    primitive=last.get('outcome',{})
+                    def diagnostic(value,limit=160):
+                        return value[:limit] if isinstance(value,str) else None
+                    driver=primitive.get('driver') if isinstance(primitive.get('driver'),dict) else {}
+                    failure={'step_id':last['step_id'],'phase':diagnostic(primitive.get('phase'),40),
+                        'reason':diagnostic(primitive.get('reason'),80),
+                        'first_perception_error':diagnostic(primitive.get('perception_detail')),
+                        'retry_perception_error':diagnostic(primitive.get('recovery_detail')),
+                        'driver_reason':diagnostic(driver.get('reason'),80)}
+                    evidence=_perception_diagnostic(primitive.get('perception_evidence'))
+                    if evidence is not None:failure['perception_evidence']=evidence
+                    outcome.update(failure=failure,perception_detail=failure['first_perception_error'],
+                        recovery_detail=failure['retry_perception_error'],driver_reason=failure['driver_reason'])
                 if extra:
                     outcome.update(extra)
                 with self._lock:
@@ -307,10 +351,10 @@ class SequenceExecutionService:
                     calls, actions = detail.get('calls'), detail.get('actions')
                     if type(calls) is int and 0 <= calls <= min(available, local):
                         child_calls = max(child_calls, calls)
-                        forwarded['calls'] = invocation_calls + calls
+                        forwarded['calls'] = invocation_calls + child_calls
                     if type(actions) is int and actions >= 0:
                         child_actions = max(child_actions, actions)
-                        forwarded['actions'] = invocation_actions + actions
+                        forwarded['actions'] = invocation_actions + child_actions
                     # Primitive tokens/checkpoints are never model-facing telemetry.
                     forwarded.pop('resume_token', None)
                     forwarded.pop('checkpoint', None)
@@ -324,14 +368,14 @@ class SequenceExecutionService:
                         deepcopy(step), max_calls=available, deadline=current.deadline,
                         cycle_max_calls=min(local, available), cancel_event=cancel,
                         event_callback=on_event, resume_token=current.primitive_token)
-                except Exception:
+                except Exception as exc:
                     invocation_calls += child_calls
                     invocation_actions += child_actions
                     current.calls += child_calls
                     current.actions += child_actions
                     self.primitive_executor.stop()
                     return result('cancelled' if cancelled() else 'failed',
-                                  'cancelled' if cancelled() else 'primitive_execution_failed')
+                                  'cancelled' if cancelled() else str(exc) if str(exc) in ('holding_state_unknown','verified_held_object_required','already_holding') else 'primitive_execution_failed')
                 if (not isinstance(primitive, dict)
                         or type(primitive.get('calls')) is not int
                         or not child_calls <= primitive['calls'] <= min(available, local)
@@ -350,6 +394,7 @@ class SequenceExecutionService:
                     self.primitive_executor.stop()
                     return result('failed', 'invalid_primitive_outcome')
                 used, applied = primitive['calls'], primitive['actions']
+                if isinstance(primitive.get('progress'),list):invocation_progress.extend(deepcopy(primitive['progress'][-8:]))
                 invocation_calls += used
                 invocation_actions += applied
                 current.calls += used

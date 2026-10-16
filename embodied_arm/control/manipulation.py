@@ -6,6 +6,7 @@ substitute simulator object poses. Explicit experimental mode is restricted to t
 visual and movement guards remain mandatory.
 """
 import math
+from copy import deepcopy
 import threading
 import time
 from embodied_arm.perception.camera_perception import EstimatedScene
@@ -33,6 +34,13 @@ class VisualManipulationExecutor:
         self.max_seconds = max_seconds
         self.held = None
         self.held_evidence = None
+        self.holding_status = 'verified_empty'
+        self._verified_lift_snapshot = None
+        self._historical_held_candidate = None
+        self._stopped_robot = None
+        self._stopped_at = None
+        self._holding_generation = 0
+        self._holding_lock = threading.RLock()
         self._run_state = None
         self._support_policy = None
         self.validated = bool(getattr(observer, 'validated', False) and getattr(driver, 'validated', False))
@@ -53,14 +61,55 @@ class VisualManipulationExecutor:
 
     def reset(self):
         self.stop()
-        self.held=None
-        self.held_evidence=None
+        with self._holding_lock:
+            self.held=None
+            self.held_evidence=None
+            self.holding_status='verified_empty'
+            self._verified_lift_snapshot=None
+            self._historical_held_candidate=None
+            self._stopped_robot=None
+            self._stopped_at=None
+            self._holding_generation+=1
+
+    @staticmethod
+    def _unchanged_stopped_robot(previous,current):
+        """Additional Stops can increment epoch, but cannot excuse motion."""
+        return (current['epoch']>=previous['epoch'] and current['actions']==previous['actions']
+                and not current['busy'] and current['paused']
+                and math.dist(current['ee'],previous['ee'])<=.001
+                and max(abs(a-b) for a,b in zip(current['joints'],previous['joints']))<=.005
+                and abs(current['gripper_openness']-previous['gripper_openness'])<=.01
+                and abs(current['gripper_angle']-previous['gripper_angle'])<=.01)
 
     def stop(self):
-        self._run_state=None
-        self._support_policy=None
-        self.held_evidence=None
-        self.sim.stop()
+        from embodied_arm.control.held_continuity import remember_verified_hold
+        with self._holding_lock:
+            run=self._run_state
+            state=run.get('holding_state') if run else ('held_verified' if self.holding_status=='verified_held' else 'unknown')
+            pending=run.get('pending') or {} if run else {}
+            unsafe_phase=bool(run and (run.get('phase') in ('closing','close','release','released','verify_release')
+                                      or pending.get('phase') in ('closing','close','release','released','verify_release')))
+            candidate=None
+            if state=='held_verified' and not unsafe_phase:
+                candidate=remember_verified_hold(self.held_evidence,self._verified_lift_snapshot,
+                                                 holding_state=state)
+            elif self._historical_held_candidate is not None and run is None and self._stopped_robot is not None:
+                try:
+                    before=robot_only(self.sim.proprioception())
+                    if self._unchanged_stopped_robot(self._stopped_robot,before):
+                        candidate=self._historical_held_candidate
+                except (ValueError,KeyError,TypeError,AttributeError):pass
+            keep_empty=self.holding_status=='verified_empty' and not unsafe_phase and (run is None or state=='empty')
+            self._run_state=None
+            self._support_policy=None
+            self.held_evidence=None
+            self._historical_held_candidate=candidate
+            self.holding_status='verified_empty' if keep_empty else 'unknown'
+            self._holding_generation+=1
+            self.sim.stop()
+            self._stopped_at=self.clock()
+            try:self._stopped_robot=robot_only(self.sim.proprioception())
+            except (ValueError,KeyError,TypeError,AttributeError):self._stopped_robot=None
         if hasattr(self.observer, 'cancel'):
             self.observer.cancel()
 
@@ -68,9 +117,61 @@ class VisualManipulationExecutor:
         run=self._run_state
         if run is not None and run.get('holding_state')!='held_verified':return None
         evidence=self.held_evidence
-        if evidence and evidence.get("epoch")==self.sim.proprioception().get("epoch"):
-            return self.held
+        keys={'object_id','epoch','actions','frame_ids','identity_token','verified_lift','source'}
+        if (self.holding_status!='verified_held' or not isinstance(evidence,dict) or set(evidence)!=keys
+                or evidence['object_id']!=self.held or evidence['verified_lift'] is not True
+                or evidence['source']!='phase_scoped_temporal_rgb'):return None
+        try:
+            current=robot_only(self.sim.proprioception())
+            if (current['epoch']==evidence['epoch'] and current['paused'] and not current['busy']
+                    and (evidence['actions']==current['actions'] if run is None else evidence['actions']<=current['actions'])):
+                return self.held
+        except (ValueError,KeyError,TypeError,AttributeError):pass
         return None
+
+    def robot_state(self):
+        """Bounded encoder state for the high-level planner; no object oracle."""
+        try:robot=robot_only(self.sim.proprioception())
+        except (ValueError,KeyError,TypeError,AttributeError):return None
+        status=self.holding_status
+        if status=='verified_held' and self.planning_held_object() is None:status='unknown'
+        return {'joints':list(robot['joints']),'gripper_openness':robot['gripper_openness'],
+                'holding_status':status}
+
+    def reconcile_observation(self):
+        """Recheck quarantined hold history against newly observed paused RGB."""
+        from embodied_arm.control.held_continuity import verify_stopped_hold
+        with self._holding_lock:
+            candidate=self._historical_held_candidate
+            if candidate is None:return None
+            generation=self._holding_generation
+            stopped=deepcopy(self._stopped_robot);stopped_at=self._stopped_at
+        failed={'verified':False,'holding_state':'unknown','certificate':None,
+                'physical_contact_verified':False,'source':'stopped_hold_rgb_continuity'}
+        try:
+            fresh=self.observer.prepare_hold_reacquisition(candidate.object_id)
+            verdict=verify_stopped_hold(candidate,fresh,stopped_robot=stopped,
+                current_robot=robot_only(self.sim.proprioception()),stopped_at=stopped_at,
+                now=self.clock(),holding_state='held_verified')
+            if not verdict['verified']:return verdict
+            with self._holding_lock:
+                if generation!=self._holding_generation:return {**failed,'reason':'holding_reacquisition_cancelled'}
+            self.observer.adopt_verified_hold(verdict['certificate'])
+            with self._holding_lock:
+                current=robot_only(self.sim.proprioception())
+                if (generation!=self._holding_generation
+                        or not self._unchanged_stopped_robot(stopped,current)
+                        or current['epoch']!=stopped['epoch']):
+                    return {**failed,'reason':'holding_reacquisition_cancelled'}
+                self.held=candidate.object_id
+                self.held_evidence=deepcopy(verdict['certificate'])
+                self._verified_lift_snapshot=deepcopy(fresh)
+                self.holding_status='verified_held'
+                self._historical_held_candidate=None
+                self._stopped_robot=None;self._stopped_at=None
+                return verdict
+        except (ValueError,KeyError,TypeError,AttributeError):
+            return {**failed,'reason':'fresh_hold_rgb_unavailable'}
 
     def pause(self):
         self.sim.pause_idle()
@@ -111,6 +212,7 @@ class VisualManipulationExecutor:
         deadline=min(self.clock()+self.max_seconds,deadline if deadline is not None else float('inf'))
         if not math.isfinite(deadline) or deadline<=self.clock():raise ValueError('time_budget')
         cancel=cancel_event or threading.Event()
+        holding_generation=self._holding_generation
         run=getattr(self,'_run_state',None)
         if run is not None:
             if not isinstance(resume_token,str) or resume_token!=run['token'] or intent!=run['intent']:
@@ -121,6 +223,7 @@ class VisualManipulationExecutor:
             run['token']=None
         elif resume_token is not None:raise ValueError('invalid_resume')
         else:
+            if self.holding_status=='unknown':raise ValueError('holding_state_unknown')
             if intent['action']=='pick' and self.held is not None:raise ValueError('already_holding')
             if intent['action']=='place' and (self.held!=obj or (self.experimental_simulation and self.planning_held_object()!=obj)):raise ValueError('verified_held_object_required')
             run={'intent':intent,'program':self._program(intent),'pending':None,'token':None,
@@ -130,8 +233,10 @@ class VisualManipulationExecutor:
             self._run_state=run
             self.last_driver_outcome=None
         limit=min(limit,run['initial_limit']-run['total_calls'])
-        calls=actions=0;last_snapshot=None
+        calls=actions=0;live_calls=live_actions=0;last_snapshot=None;progress=[]
         def checked():
+            if holding_generation!=self._holding_generation or self._run_state is not run:
+                raise ValueError('cancelled')
             if cancel.is_set():raise ValueError('cancelled')
             if self.clock()>=deadline:raise ValueError('time_budget')
         def emit(detail):
@@ -141,11 +246,11 @@ class VisualManipulationExecutor:
             nonlocal last_snapshot
             checked()
             try:last_snapshot=self.observer.observe()
-            except ValueError:
+            except ValueError as exc:
                 if run['retries']>=1:raise
-                run['initial_perception_error']=getattr(self.observer,'last_error',None)
+                run['initial_perception_error']=getattr(self.observer,'last_error',None) or str(exc)[:160]
                 run['retries']+=1
-                emit({'phase':'observation_recovery','attempt':run['retries'],'reason':'fresh_rgb_rejected','calls':calls,'actions':actions})
+                emit({'phase':'observation_recovery','attempt':run['retries'],'reason':'fresh_rgb_rejected','first_error':run.get('initial_perception_error'),'calls':calls+live_calls,'actions':actions+live_actions})
                 checked();last_snapshot=self.observer.observe()
             self._point(last_snapshot,obj)
             return last_snapshot
@@ -154,7 +259,7 @@ class VisualManipulationExecutor:
                 'object_id':obj,'calls':calls,'actions':actions,'phase':run['phase'],'phases':list(run['phases']),
                 'holding_state':run['holding_state'],'source':'rgb_only','controller':'jev',
                 'decision_provenance':sorted(run['sources']),'observation_retries':run['retries'],
-                'recent_actions':list(run['recent_actions']),**extra}
+                'recent_actions':list(run['recent_actions']),'progress':list(progress),**extra}
         def suspend():
             checked();self.sim.pause_idle()
             run['robot']=robot_only(self.sim.proprioception());run['token']=secrets.token_hex(16)
@@ -195,13 +300,36 @@ class VisualManipulationExecutor:
                         self._check_path(snapshot,obj,next_target)
                         return {'target_xyz':list(next_target),'covariance_m2':covariance}
                     def micro_event(detail):
+                        nonlocal live_calls,live_actions
+                        if type(detail.get('calls')) is int:live_calls=max(live_calls,detail['calls'])
+                        if type(detail.get('actions')) is int:live_actions=max(live_actions,detail['actions'])
+                        if detail.get('phase')=='observation' and detail.get('kind')=='cartesian' and last_snapshot is not None:
+                            point=self._point(last_snapshot,obj)
+                            values={'goal':list(detail['goal']),'error':list(detail['error_xyz_m']),'object':list(point.xyz)}
+                            if not progress or progress[-1]['phase']!=run['phase']:
+                                progress.append({'phase':run['phase'],'goal_start_xyz_m':values['goal'],
+                                    'goal_end_xyz_m':values['goal'],'error_start_xyz_m':values['error'],
+                                    'error_end_xyz_m':values['error'],'object_start_xyz_m':values['object'],
+                                    'object_end_xyz_m':values['object'],'observations':1})
+                                del progress[:-8]
+                            else:
+                                progress[-1].update(goal_end_xyz_m=values['goal'],error_end_xyz_m=values['error'],object_end_xyz_m=values['object'])
+                                progress[-1]['observations']+=1
                         if detail.get('phase') in ('motion_applied','motion_completed') and run['recent_actions']:
                             run['recent_actions'][-1]['applied']=True
                         if detail.get('phase')=='jev_decision':
                             run['recent_actions'].append({'action':detail.get('action') or 'hold','applied':False})
                             run['recent_actions']=run['recent_actions'][-8:]
-                        emit({**detail,'calls':calls+detail.get('calls',0),'actions':actions+detail.get('actions',0)})
+                        emit({**detail,'calls':calls+live_calls,'actions':actions+live_actions})
                     allowance=min(limit-calls,cycle-calls)
+                    if op['kind']=='gripper' and op['phase'] in ('close','release'):
+                        # Mark uncertainty before the first command, including
+                        # a Stop while the gripper trajectory is still pending.
+                        run['holding_state']='release_pending' if op['phase']=='release' else 'unknown'
+                        self.holding_status='unknown'
+                        self.held_evidence=None
+                        self._verified_lift_snapshot=None
+                        self._historical_held_candidate=None
                     options={'cancel_event':cancel,'max_calls':allowance,'deadline':deadline,
                              'before_decision':fresh,'after_motion':observation,'event_callback':micro_event,
                              'yield_on_budget':cycle_max_calls is not None and allowance<limit-calls}
@@ -212,6 +340,7 @@ class VisualManipulationExecutor:
                     used=outcome.get('calls');applied=outcome.get('actions')
                     if type(used) is not int or not 0<=used<=allowance or type(applied) is not int or applied<0:raise ValueError('invalid_driver_accounting')
                     calls+=used;actions+=applied;run['total_calls']+=used;run['total_actions']+=applied
+                    live_calls=live_actions=0
                     run['sources'].add(outcome.get('provenance','unverified'));self.last_driver_outcome=outcome
                     checked()
                     if outcome.get('status')=='yielded':return suspend()
@@ -227,18 +356,36 @@ class VisualManipulationExecutor:
                     checked();self.sim.pause_idle();self._run_state=None;self._support_policy=None
                     return result('completed','visually_verified',feedback=feedback)
         except Exception as exc:
+            # cancel() clears the observer's diagnostic lease. Preserve the
+            # original and retry evidence before Stop invalidates that state.
+            perception_detail=run.get('initial_perception_error') or getattr(self.observer,'last_error',None)
+            recovery_detail=getattr(self.observer,'last_error',None)
+            perception_evidence=deepcopy(getattr(self.observer,'last_failure_details',None))
             allowed={'cancelled','time_budget','call_budget_exhausted','precision_floor','perception_rejected','controller_rejected',
                      'uncertainty_unresolved','grasp_not_visually_verified','release_not_visually_verified','unknown_support',
                      'unsafe_release_geometry','prerelease_alignment_unverified','prerelease_object_alignment_unverified','preclose_alignment_unverified','horizontal_motion_below_transit_height','observed_obstacle_clearance'}
             reason=str(exc) if str(exc) in allowed else 'execution_failed'
-            self._run_state=None;self._support_policy=None;self.sim.stop()
-            if run['holding_state']!='empty':run['holding_state']='unknown'
+            with self._holding_lock:
+                if holding_generation==self._holding_generation:
+                    if run['holding_state']!='empty':
+                        run['holding_state']='unknown';self.holding_status='unknown'
+                        self.held_evidence=None;self._verified_lift_snapshot=None;self._historical_held_candidate=None
+                    self.stop()
+                else:
+                    # An explicit Stop already quarantined a verified history.
+                    # Preserve it through cancellation unwinding, never through a
+                    # genuine failure that happened without that external Stop.
+                    self.stop()
+                    if run['holding_state']!='empty':run['holding_state']='unknown'
             return result('cancelled' if cancel.is_set() else 'failed',reason,
-                          perception_detail=run.get('initial_perception_error') or getattr(self.observer,'last_error',None),
-                          recovery_detail=getattr(self.observer,'last_error',None),driver=getattr(self,'last_driver_outcome',None))
+                          perception_detail=perception_detail,recovery_detail=recovery_detail,
+                          perception_evidence=perception_evidence,
+                          driver=getattr(self,'last_driver_outcome',None))
 
     def _program(self,plan):
         obj=plan['object_id']
+        active_run=self._run_state
+        holding_generation=self._holding_generation
         self.observer.configure_task(plan['action'])
         if hasattr(self.observer,'begin_step'):
             support=plan['target_id']
@@ -267,10 +414,16 @@ class VisualManipulationExecutor:
             lifted=yield {'kind':'observe','phase':'verify_lift'}
             feedback=self.observer.verify_lift(baseline,lifted,obj)
             if feedback.get('verified') is not True:raise ValueError('grasp_not_visually_verified')
-            self.held=obj;self.held_evidence={'object_id':obj,'epoch':lifted['robot']['epoch'],'actions':lifted['robot']['actions'],
-                'frame_ids':lifted['scene']['frame_ids'],'identity_token':lifted['visual_evidence']['identity_token'],
-                'verified_lift':True,'source':'phase_scoped_temporal_rgb'}
-            self._run_state['holding_state']='held_verified'
+            with self._holding_lock:
+                if (active_run is None or self._run_state is not active_run
+                        or holding_generation!=self._holding_generation):
+                    raise ValueError('cancelled')
+                self.held=obj;self.held_evidence={'object_id':obj,'epoch':lifted['robot']['epoch'],'actions':lifted['robot']['actions'],
+                    'frame_ids':deepcopy(lifted['scene']['frame_ids']),'identity_token':lifted['visual_evidence']['identity_token'],
+                    'verified_lift':True,'source':'phase_scoped_temporal_rgb'}
+                self._verified_lift_snapshot=deepcopy(lifted);self._historical_held_candidate=None
+                self.holding_status='verified_held'
+                active_run['holding_state']='held_verified'
             return feedback
         from embodied_arm.perception.camera_perception import ObjectEstimate
         support_id=plan['target_id'].split(':',1)[1] if plan['target_id'].startswith('on:') else None
@@ -305,7 +458,12 @@ class VisualManipulationExecutor:
             feedback=verify_stack_release(before,released,retreated,obj,support_id,now=self.clock(),lease_seconds=getattr(self.observer,'lease_seconds',120))
         else:feedback=self.observer.verify_release(before,released,retreated,obj,list(goal.xyz))
         if feedback.get('verified') is not True:raise ValueError('release_not_visually_verified')
-        self.held=None;self.held_evidence=None;self._run_state['holding_state']='empty'
+        with self._holding_lock:
+            if (active_run is None or self._run_state is not active_run
+                    or holding_generation!=self._holding_generation):
+                raise ValueError('cancelled')
+            self.held=None;self.held_evidence=None;active_run['holding_state']='empty'
+            self.holding_status='verified_empty';self._verified_lift_snapshot=None;self._historical_held_candidate=None
         return feedback
 
     def _check_release_alignment(self, snapshot, object_id, resolver):

@@ -8,7 +8,7 @@ return `${band.axis.toUpperCase()}：误差诊断区间 [${(band.interval_m[0]*1
 }
 function formatTaskError(code){
 if(code&&typeof code==='object')code=code.code||code.reason||'observation_unavailable';
-const labels={cycle_review_budget:'周期复核预算已用完，任务已停止；未确认完成。',planner_stopped_cycle:'Qwen 周期复核决定停止，后续动作未启动；未确认任务完成。',timeout:'视觉请求超时，未获得有效观察；没有执行动作。',expired:'视觉会话已到期，自动观察未完成；没有执行动作。',call_budget_exhausted:'视觉请求预算已用完，自动观察未完成；没有执行动作。',landmark_uncertain:'图像定位不够精确，不能安全生成动作；没有执行动作。',occluded:'目标被遮挡，未获得可靠观察；没有执行动作。',occluded_or_missing_feature:'目标被遮挡或缺少可识别特征；没有执行动作。',uncertain_detection:'图像检测不确定；没有执行动作。',low_confidence:'视觉识别置信度不足；没有执行动作。',unavailable:'视觉服务当前不可用；没有执行动作。',scene_changed_during_vision:'识别期间场景改变，结果已丢弃；没有执行动作。',invalid_or_stale_frame:'识别图像无效或已过期；没有执行动作。',stale_frame:'识别图像已过期；没有执行动作。',vision_unavailable:'视觉服务未启动或已到期，自动识别未能开始；没有执行动作，无需上传图片。',network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',vision_network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',camera_capture_failed:'模拟相机采样失败；没有执行动作，请查看相机状态。',jev_unavailable:'Jev 控制器会话不可用；执行不会启动，仍可发送消息或生成计划预览。',controller_readiness_unknown:'无法确认 Jev 控制器是否就绪；执行不会启动，仍可发送消息或生成计划预览。',visual_execution_not_validated:'本次服务没有可用的任务执行器；只能显式生成预览。',brain_unavailable:'Qwen 对话服务离线，本次请求未发送。',execution_unavailable:'任务执行器当前不可用；没有执行动作。',task_busy:'已有任务正在处理，本次请求未发送。',invalid_text:'请输入 1 到 2000 字的消息。',observation_unavailable:'无法取得有效视觉观察，没有执行动作。',planning_failed:'Qwen 请求失败或规划未通过校验，没有执行动作。',brain_rejected:'Qwen 回复未通过校验，没有执行动作。',unexpected_motion_plan:'仅对话模式收到动作计划，已拒绝；没有执行动作。',unsupported_task:'当前执行器不支持该任务，没有执行动作。',execution_failed:'执行途中失败，机械臂已停止；任务未完成。',execution_unverified:'动作结果未通过验证，机械臂已停止；不能确认任务完成。'};
+const labels={holding_state_unknown:'新图像与机器人自身状态无法确认夹爪是否可靠持物；任务已停止，场景未重置。',rgb_face_refinement_rejected:'本地 RGB 顶面细化未通过检查；请查看对象与相机诊断。',triangulation_rejected:'多视角三维重建未通过检查；请查看重建诊断。',frame_mismatch:'识别结果与相机帧不匹配，结果已拒绝。',invalid_response:'视觉服务返回了无效响应，结果已拒绝。',vision_rejected:'视觉识别未通过检查，结果已拒绝。',rgb_tracking_rejected:'本地 RGB 跟踪未通过检查，结果已拒绝。',cycle_review_budget:'周期复核预算已用完，任务已停止；未确认完成。',planner_stopped_cycle:'Qwen 周期复核决定停止，后续动作未启动；未确认任务完成。',timeout:'视觉请求超时，未获得有效观察；没有执行动作。',expired:'视觉会话已到期，自动观察未完成；没有执行动作。',call_budget_exhausted:'视觉请求预算已用完，自动观察未完成；没有执行动作。',landmark_uncertain:'图像定位不够精确，不能安全生成动作；没有执行动作。',occluded:'目标被遮挡，未获得可靠观察；没有执行动作。',occluded_or_missing_feature:'目标被遮挡或缺少可识别特征；没有执行动作。',uncertain_detection:'图像检测不确定；没有执行动作。',low_confidence:'视觉识别置信度不足；没有执行动作。',unavailable:'视觉服务当前不可用；没有执行动作。',scene_changed_during_vision:'识别期间场景改变，结果已丢弃；没有执行动作。',invalid_or_stale_frame:'识别图像无效或已过期；没有执行动作。',stale_frame:'识别图像已过期；没有执行动作。',vision_unavailable:'视觉服务未启动或已到期，自动识别未能开始；没有执行动作，无需上传图片。',network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',vision_network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',camera_capture_failed:'模拟相机采样失败；没有执行动作，请查看相机状态。',jev_unavailable:'Jev 控制器会话不可用；执行不会启动，仍可发送消息或生成计划预览。',controller_readiness_unknown:'无法确认 Jev 控制器是否就绪；执行不会启动，仍可发送消息或生成计划预览。',visual_execution_not_validated:'本次服务没有可用的任务执行器；只能显式生成预览。',brain_unavailable:'Qwen 对话服务离线，本次请求未发送。',execution_unavailable:'任务执行器当前不可用；没有执行动作。',task_busy:'已有任务正在处理，本次请求未发送。',invalid_text:'请输入 1 到 2000 字的消息。',observation_unavailable:'无法取得有效视觉观察，没有执行动作。',planning_failed:'Qwen 请求失败或规划未通过校验，没有执行动作。',brain_rejected:'Qwen 回复未通过校验，没有执行动作。',unexpected_motion_plan:'仅对话模式收到动作计划，已拒绝；没有执行动作。',unsupported_task:'当前执行器不支持该任务，没有执行动作。',execution_failed:'执行途中失败，机械臂已停止；任务未完成。',execution_unverified:'动作结果未通过验证，机械臂已停止；不能确认任务完成。'};
 return labels[code]||code||'';
 }
 function formatEventDetail(detail){
@@ -19,12 +19,12 @@ return labels[detail]||formatTaskError(detail);
 function formatLoopEvent(detail){
 const iteration=Number.isInteger(detail.iteration)?`第 ${detail.iteration} 轮 · `:'';
 const action={x_plus:'X 正向微调',x_minus:'X 负向微调',y_plus:'Y 正向微调',y_minus:'Y 负向微调',z_plus:'Z 正向微调',z_minus:'Z 负向微调',open:'打开夹爪',close:'闭合夹爪',hold:'保持'}[detail.action]||detail.action||'未选定动作';
-const count=`${Number.isFinite(detail.calls)?` · Jev ${detail.calls} 次`:''}${Number.isFinite(detail.actions)?` · 已应用 ${detail.actions} 步`:''}`;
+const count=(detail.phase==='observation_recovery'?' · 全任务累计':'')+`${Number.isFinite(detail.calls)?` · Jev ${detail.calls} 次`:''}${Number.isFinite(detail.actions)?` · 已应用 ${detail.actions} 步`:''}`;
 if(detail.phase==='observation')return iteration+'已取得新观察'+(Number.isFinite(detail.observation_age_seconds)?` · 图像年龄 ${detail.observation_age_seconds.toFixed(2)} 秒`:'')+(detail.frame_ids?' · 帧 '+Object.values(detail.frame_ids).join(' / '):'')+(detail.goal?' · 目标 '+formatLoopGoal(detail.goal):'')+count;
-if(detail.phase==='jev_decision')return iteration+`Jev ${detail.accepted?'接受':'拒绝'}决策 · ${action}`+(Number.isFinite(detail.confidence)?` · 置信度 ${detail.confidence.toFixed(2)}`:'')+(detail.provenance?' · 来源 '+detail.provenance:'')+formatRoundtrip('Jev',detail.decision_roundtrip_seconds)+' · 决策接受不代表动作已执行或任务完成';
+if(detail.phase==='jev_decision')return iteration+`Jev ${detail.accepted?'接受':'拒绝'}决策 · ${action}`+(Number.isFinite(detail.confidence)?` · 置信度 ${detail.confidence.toFixed(2)}`:'')+(detail.provenance?' · 来源 '+formatProvenance(detail.provenance):'')+formatRoundtrip('Jev',detail.decision_roundtrip_seconds)+' · 决策接受不代表动作已执行或任务完成';
 if(detail.phase==='motion_applied')return iteration+'指令已施加，运动与视觉结果待确认'+count;
 if(detail.phase==='motion_completed')return iteration+(detail.applied?'局部微动作结束并收到新图像反馈；不代表整个任务完成':'动作反馈尚未确认')+count;
-if(detail.phase==='observation_recovery')return `第 ${detail.attempt||1} 次静止重新观察 · 上一次新 RGB 未通过检查；保持停止，尚未确认恢复`+count;
+if(detail.phase==='observation_recovery')return `第 ${detail.attempt||1} 次静止重新观察 · 上一次新 RGB 未通过检查；保持停止，尚未确认恢复`+count+(detail.first_error?' · 首次视觉错误：'+detail.first_error:'')+(detail.retry_error?' · 重试视觉错误：'+detail.retry_error:'');
 if(detail.phase==='decision_stale')return iteration+'决策所依据的观察已过期，未应用该决策；需重新观察'+count;
 if(detail.phase==='local_goal_verified')return iteration+'局部航点已验证；整个任务尚需独立图像验证'+count;
 if(detail.reason==='cycle_budget')return `第 ${detail.attempt||1} 次周期复核 · 微动作已暂停；Qwen 正在检查新图像，复核通过后才继续` ;
@@ -52,15 +52,44 @@ if(!camera)return '自动相机状态暂不可用';
 const labels={ready:'本地双相机图像已更新',capturing:'正在本地采样双相机图像',error:'本地相机采样失败',stopped:'本地相机采样已停止'};
 return `${labels[camera.status]||'等待相机采样'} · 每 ${camera.interval_seconds||1} 秒本地采样 · 模型调用 0 次`+(Number.isFinite(camera.age_seconds)?` · 图像年龄 ${camera.age_seconds.toFixed(1)} 秒`:'')+(camera.error?' · '+formatTaskError(camera.error):'')+formatCameraProfile(camera);
 }
+function formatRuntimeNotice(notice){
+const id=typeof notice.request_id==='string'?notice.request_id.slice(0,8):'未提供';
+const reason=formatTaskError(notice.reason);
+const remedy=['vision_unavailable','network_error','timeout','expired','call_budget_exhausted','unavailable'].includes(notice.reason)?'请检查对应模型服务、网络或剩余预算；恢复后可重新提交。':'请查看本次视觉 / 执行诊断；修正原因后可重新提交，系统会重新检查观察。';
+return `系统反馈 · 请求 ${id} · ${notice.request_text||''}：${reason} `+(notice.motion_executed?'本次已经施加过动作，任务未确认完成。':'本次未执行动作。')+' '+remedy;
+}
+function formatPerceptionEvidence(evidence){
+if(!evidence)return '';
+const labels={red:'红色方块',blue:'蓝色方块',goal:'绿色目标区域'};
+const fits=(Array.isArray(evidence.fits)?evidence.fits:[]).filter(f=>f.accepted!==true).slice(0,6).map(f=>`${labels[f.object_id]||f.object_id||'对象未提供'} / 相机 ${f.camera_id||'未提供'}：${f.reason||'未提供原因'}`);
+const landmarks=(Array.isArray(evidence.landmarks)?evidence.landmarks:[]).slice(0,3).map(l=>`${labels[l.object_id]||l.object_id||'对象未提供'}：${l.reason||'未提供原因'}`);
+return [...(evidence.reason?['视觉证据：'+evidence.reason]:[]),...fits.map(f=>'图像拟合 '+f),...landmarks.map(l=>'三维重建 '+l)].join(' · ');
+}
+function formatProvenance(value){
+if(value==='unverified')return 'unverified（缺少来源验证元数据，不能据此判断为假模型或置信度拒绝）';
+return String(value);
+}
 function formatExecutionOutcome(outcome){
 const parts=['执行反馈'];
+const failure=outcome.failure;
+if(failure){
+if(failure.step_id)parts.push('失败步骤：'+failure.step_id);
+if(failure.phase)parts.push('失败阶段：'+failure.phase);
+if(failure.reason)parts.push('步骤错误：'+formatLoopReason(failure.reason));
+if(failure.first_perception_error)parts.push('首次视觉错误：'+failure.first_perception_error);
+if(failure.retry_perception_error)parts.push('重试视觉错误：'+failure.retry_perception_error);
+if(failure.driver_reason)parts.push('微动作错误：'+formatLoopReason(failure.driver_reason));
+const evidence=formatPerceptionEvidence(failure.perception_evidence);if(evidence)parts.push(evidence);
+}
 if(outcome.reason)parts.push((outcome.status==='yielded'?'周期暂停原因：':'停止原因：')+formatLoopReason(outcome.reason));
 if(outcome.perception_detail)parts.push('视觉检查：'+(typeof outcome.perception_detail==='string'?outcome.perception_detail:JSON.stringify(outcome.perception_detail)));
-if(outcome.driver?.reason)parts.push('小脑 / 微动作：'+formatLoopReason(outcome.driver.reason));
+if(outcome.recovery_detail&&!failure)parts.push('重试视觉检查：'+String(outcome.recovery_detail));
+const driverReason=outcome.driver_reason||outcome.driver?.reason;
+if(driverReason&&!failure?.driver_reason)parts.push('小脑 / 微动作：'+formatLoopReason(driverReason));
 if(Number.isFinite(outcome.calls))parts.push(`Jev ${outcome.calls} 次`);
 if(Number.isFinite(outcome.actions))parts.push(`已应用 ${outcome.actions} 步`);
 const provenance=outcome.decision_provenance||outcome.provenance;
-if(provenance)parts.push('来源：'+(Array.isArray(provenance)?provenance.join(' / '):String(provenance)));
+if(provenance)parts.push('来源：'+(Array.isArray(provenance)?provenance.map(formatProvenance).join(' / '):formatProvenance(provenance)));
 return parts.join(' · ');
 }
 function formatCameraProfile(camera){
@@ -125,12 +154,19 @@ $('task-status').textContent=`独立动作计划预览（此预览不执行） �
 $('model-status').textContent=`Qwen 大脑：${s.brain.configured?'已配置':'未配置'}，${s.brain.calls||0} 次 · RGB 视觉：${p.worker?.calls||0} 次，剩余 ${p.worker?.remaining_calls??0} 次 · Jev：${s.waypoint?.motion_enabled?(s.controller.available?'实验会话可用':'会话不可用'):'运动未启用'} · 无自动回退`;
 const chat=s.chat||{};$('send').disabled=!chat.available||s.pending||mutation;$('plan-send').disabled=!s.task.available||s.pending||mutation;
 const chatLabels={replanning:'正在根据新观察重新规划…',queued:'请求已排队',observing:'正在获取视觉观察…',executing:'任务正在执行，请查看进度',blocked:'任务已被阻止',idle:'可以发送文字消息',thinking:'Qwen 正在回复…',ready:'回复已收到',plan_preview:'动作计划已生成，仅供预览，未执行动作',cancelled:'对话已取消，迟到回复不会应用',error:'对话未完成'};
-$('chat-status').textContent=formatTaskError(chat.error)||(!chat.available?'Qwen 对话服务离线（尚未启动或会话已结束），不是视觉缺失。你仍可输入消息；服务恢复后再发送。':chatLabels[chat.status]||chat.status);
+$('chat-status').textContent=formatTaskError(chat.error)||(chat.status==='cancelled'&&s.pending?'正在停止，等待待处理调用退出…':!chat.available?'Qwen 对话服务离线（尚未启动或会话已结束），不是视觉缺失。你仍可输入消息；服务恢复后再发送。':chatLabels[chat.status]||chat.status);
 if(chat.provenance&&chat.provenance!=='none')$('chat-status').textContent+=' · 回复来源：'+(chat.provenance==='live'?'真实 Qwen API':(/mock|fake|fixture/.test(chat.provenance)?'离线测试（'+chat.provenance+'）':chat.provenance));
-const flow=s.workflow||{};const flowLabels={replanning:'正在根据图像反馈修正计划',idle:'尚未提交任务',queued:'任务已排队',observing:'正在获取新鲜视觉观察',planning:'Qwen 正在理解与规划',executing:'机械臂正在执行',plan_preview:'预览已生成，未执行动作；没有执行任务排队',completed:flow.execute?'任务流程结束':'回复完成（未执行动作）',blocked:'任务被阻止',failed:'任务失败',cancelled:'任务已停止'};
-$('task-send').disabled=!flow.execution_available||!chat.available||s.pending||mutation;
+const flow=s.workflow||{};
+const taskActive=Boolean(s.pending||['queued','observing','planning','executing','replanning','stopping'].includes(flow.state));
+$('request').disabled=taskActive||mutation;
+$('send').disabled=!chat.available||taskActive||mutation;$('plan-send').disabled=!s.task.available||taskActive||mutation;
+$('input-status').textContent=taskActive?'任务处理中，输入已锁定。请先停止，收到停止确认后再输入新命令。':'可输入新命令；会基于当前图像与机械臂状态重新检查，不会自动重置场景。';
+const flowLabels={replanning:'正在根据图像反馈修正计划',idle:'尚未提交任务',queued:'任务已排队',observing:'正在获取新鲜视觉观察',planning:'Qwen 正在理解与规划',executing:'机械臂正在执行',plan_preview:'预览已生成，未执行动作；没有执行任务排队',completed:flow.execute?'任务流程结束':'回复完成（未执行动作）',blocked:'任务被阻止',failed:'任务失败',stopping:'正在停止，等待确认',cancelled:'任务已停止'};
+$('task-send').disabled=!flow.execution_available||!chat.available||taskActive||mutation;
 $('simulation-warning').textContent=flow.execution_validation==='experimental_simulation'?'已启用实验性虚拟机器人执行；真实模型整链路尚未完成验收。每步仍受图像、工作空间、置信度和预算检查约束，可能中止，不能用于真实硬件。':'仅用于虚拟机器人。执行是否可用以上方服务状态为准；模型计划不代表任务已启动。';
-$('workflow-status').textContent=(flowLabels[flow.state]||flow.state||'')+(flow.error?' · '+formatTaskError(flow.error):'');
+$('request-id').textContent=flow.id?'当前请求：'+flow.id.slice(0,8):'尚无请求';
+$('runtime-notices').replaceChildren();for(const notice of flow.runtime_notices||[]){const row=document.createElement('p');row.className='runtime-notice';row.textContent=formatRuntimeNotice(notice);$('runtime-notices').appendChild(row)}
+$('workflow-status').textContent=(flowLabels[flow.state==='cancelled'&&s.pending?'stopping':flow.state]||flow.state||'')+(flow.error?' · '+formatTaskError(flow.error):'');
 $('execution-readiness').textContent=flow.execution_available?(chat.available?'执行服务已就绪。提交任务将自动观察、规划并尝试执行。':'大脑服务不可用，当前不能提交执行任务；没有任务排队。'):'当前不能执行任务：'+formatTaskError(flow.unavailable_reason||'execution_unavailable')+' 没有任务排队，生成预览也不会自动启动。';
 $('workflow-events').replaceChildren();for(const event of flow.events||[]){const li=document.createElement('li');li.textContent=(flowLabels[event.state]||event.state)+(event.detail?' · '+formatEventDetail(event.detail):'');$('workflow-events').appendChild(li)}
 $('chat-history').replaceChildren();for(const message of chat.messages||[]){const row=document.createElement('p');row.className='chat-message '+message.role;row.textContent=(message.role==='user'?'你：':'Qwen 建议原文（不代表系统执行状态）：')+message.content;$('chat-history').appendChild(row)}
@@ -141,7 +177,7 @@ $('waypoint-reason').textContent=waypointReasons[w.reason]||w.reason||'';
 $('waypoint-uncertainty').replaceChildren();const bands=Array.isArray(w.axis_uncertainty)?w.axis_uncertainty:[];
 for(const band of bands){const li=document.createElement('li');li.textContent=formatAxisUncertainty(band);$('waypoint-uncertainty').appendChild(li)}
 $('waypoint-uncertainty-note').hidden=!bands.length;
-const active=Boolean(s.pending||r.busy||['running','executing','observing','planning'].includes(w.status));
+const active=Boolean(taskActive||r.busy||['running','executing','observing','planning'].includes(w.status));
 $('stop').disabled=!active||mutation;
 const preview=flow.plan;
 const actionable=preview&&['pick','place','sequence'].includes(preview.action);
@@ -168,8 +204,8 @@ $('error').textContent=formatTaskError(s.error)}
 
 async function state(){try{render(await api('/api/state'))}catch(e){$('error').textContent=e.message}}
 async function frames(){if(document.hidden)return;try{renderFrames(await api('/api/frames'))}catch(e){$('error').textContent=e.message}}
-async function control(action){if(mutation)return;mutation=true;$('reset').disabled=true;try{render(await api('/api/control',{action,seed:0}));if(action==='reset')await frames()}catch(e){$('error').textContent=e.message}finally{mutation=false;$('reset').disabled=false}}
-async function request(path,body){if(mutation)return;mutation=true;try{render(await api(path,body||{}))}catch(e){$('error').textContent=e.message}finally{mutation=false;await state()}}
+async function control(action){if(mutation)return;mutation=true;$('request').disabled=true;$('reset').disabled=true;try{render(await api('/api/control',{action,seed:0}));if(action==='reset')await frames()}catch(e){$('error').textContent=e.message}finally{mutation=false;$('reset').disabled=false;await state()}}
+async function request(path,body){if(mutation)return;mutation=true;$('request').disabled=true;$('task-send').disabled=true;$('send').disabled=true;try{render(await api(path,body||{}))}catch(e){$('error').textContent=e.message}finally{mutation=false;await state()}}
 $('waypoint-red').onclick=()=>request('/api/waypoint',{object_id:'red'});$('waypoint-blue').onclick=()=>request('/api/waypoint',{object_id:'blue'});
 $('task-send').onclick=()=>request('/api/tasks',{text:$('request').value,execute:true});
 $('perceive').onclick=()=>request('/api/observe',{});$('send').onclick=()=>request('/api/chat',{text:$('request').value});$('plan-send').onclick=()=>request('/api/plan',{text:$('request').value});

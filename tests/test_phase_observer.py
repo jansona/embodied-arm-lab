@@ -70,3 +70,66 @@ def test_symbolic_stack_target_is_normalized_before_held_validation():
         observer.begin_step('place','blue',target_id='on:red')
     with pytest.raises(ValueError,match='Invalid placement support'):
         observer.begin_step('place','red',target_id='on:red')
+
+
+def test_hold_reacquisition_preserves_original_semantic_capture(monkeypatch):
+    from types import SimpleNamespace
+    original={'scene':{'frame_ids':{'left':'semantic','right':'semantic'},'captured_at':100.},
+              'robot':{'epoch':7,'actions':3}}
+    source=SimpleNamespace(sim=SimpleNamespace(),last_vision={
+        'fresh_model_request':True,'base_detector_provenance':'qwen_rgb'},
+        observation_evidence=lambda:(original,(),()))
+    observer=PhaseSceneObserver(source)
+    fresh={'scene':{'frame_ids':{'left':'tracked','right':'tracked'},'captured_at':102.},
+           'robot':{'epoch':7,'actions':3},'visual_evidence':{
+               'semantic_captured_at':100.,'identity_token':'new','source':'dynamic_rgb_track'}}
+    def begin(phase,obj):
+        assert observer.required_objects==('red','blue','goal')
+        observer.phase=phase;observer.object_id=obj;observer.identity_token='new'
+        observer.latest=fresh
+        return fresh
+    monkeypatch.setattr(observer,'begin_phase',begin)
+    monkeypatch.setattr(observer,'snapshot',lambda:fresh)
+    result=observer.prepare_hold_reacquisition('red')
+    record=result['visual_evidence']['semantic_reacquisition']
+    assert record['captured_at']==100. and record['frame_ids']['left']=='semantic'
+    assert result['visual_evidence']['source']=='dynamic_rgb_track'
+    cert={'object_id':'red','epoch':7,'actions':3,'frame_ids':fresh['scene']['frame_ids'],
+          'identity_token':'new','verified_lift':True,'source':'phase_scoped_temporal_rgb'}
+    with pytest.raises(ValueError,match='certificate'):
+        observer.adopt_verified_hold(dict(cert,actions=4))
+    observer.adopt_verified_hold(cert)
+    with pytest.raises(ValueError,match='certificate'):observer.adopt_verified_hold(cert)
+
+
+def test_hold_reacquisition_requires_new_real_semantic_request():
+    from types import SimpleNamespace
+    for provenance in ({'fresh_model_request':False,'base_detector_provenance':'qwen_rgb'},
+                       {'fresh_model_request':True,'base_detector_provenance':'offline_fixture'}):
+        observer=PhaseSceneObserver(SimpleNamespace(sim=SimpleNamespace(),last_vision=provenance))
+        with pytest.raises(ValueError,match='Fresh semantic'):
+            observer.prepare_hold_reacquisition('red')
+
+
+def test_first_rgb_fault_survives_secondary_retry_error(monkeypatch):
+    from types import SimpleNamespace
+    sim=SO101Simulation(seed=0)
+    try:
+        source=CameraSceneSource(sim,vision=RGBColourFixture(),refine_rgb=True)
+        source.refresh();observer=PhaseSceneObserver(source)
+        observer.begin_phase('approach','red')
+        detail={'object_id':'blue','camera_id':'right','reason':'roi_clipped',
+                'roi_bounds':[100,100,200,200],'uv':None}
+        observer.static.last_failure_details=[detail]
+        monkeypatch.setattr(observer.static,'track',lambda *a,**k:SimpleNamespace(
+            accepted=False,reason='tracking_refinement_failed'))
+        with pytest.raises(ValueError,match='tracking_refinement_failed'):observer.observe()
+        first=observer.last_failure_details
+        observer.static.last_failure_details=[]
+        monkeypatch.setattr(observer.static,'track',lambda *a,**k:SimpleNamespace(
+            accepted=False,reason='no_active_tracking_session'))
+        with pytest.raises(ValueError,match='no_active_tracking_session'):observer.observe()
+        assert observer.last_failure_details is first
+        assert first['fits']==[detail]
+        observer.cancel();assert observer.last_failure_details is None
+    finally:sim.close()

@@ -1,7 +1,8 @@
 """Image-coordinate-only crop geometry; no object poses or simulator reads."""
 import math
 
-def bounds_from_detections(images,detections,required_objects):
+def bounds_from_detections(images,detections,required_objects,*,radius_scale=1,expanded_camera_ids=None):
+    if radius_scale not in (1,2):raise ValueError("Invalid bounded crop scale")
     result={}
     for image in images:
         cid=image['camera_id'];width=image['width'];height=image['height']
@@ -10,7 +11,11 @@ def bounds_from_detections(images,detections,required_objects):
             matches=[d for d in detections if d.camera_id==cid and d.object_id==name]
             if len(matches)!=1 or matches[0].uv is None or matches[0].visibility!='visible':raise ValueError('Required crop landmark missing')
             points.append(matches[0].uv)
-        radius=max(24,math.ceil(width*.07))
+        # Expanded fitting must never see artificial black canvas as an edge.
+        # Include the entire 2x search plus32px for reseeding/JPEG boundaries.
+        scale=radius_scale if expanded_camera_ids is None or cid in expanded_camera_ids else 1
+        fraction=.10 if scale==2 and 'goal' in required_objects else .07
+        radius=scale*max(24,math.ceil(width*fraction))+(32 if scale==2 else 0)
         result[cid]=[max(0,math.floor((min(p[0] for p in points)-radius)/8)*8),
                      max(0,math.floor((min(p[1] for p in points)-radius)/8)*8),
                      min(width,math.ceil((max(p[0] for p in points)+radius+1)/8)*8),

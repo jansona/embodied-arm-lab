@@ -90,3 +90,20 @@ def test_live_controller_telemetry_updates_before_executor_returns():
  service=TaskService(scene_source=Source(),brain=Brain('pick'),executor=Live())
  service.submit('拿红块');result=wait(service)
  assert result['state']=='completed' and result['controller_calls']==2
+
+def test_fresh_holding_reconciliation_precedes_model_and_public_event_omits_certificate():
+ class Current(Executor):
+  experimental_simulation=True
+  def reconcile_observation(self):
+   self.reconciled=True
+   return {'verified':True,'reason':'fresh_rgb_hold_continuity_verified','holding_state':'held_verified','certificate':{'private':'server-only'}}
+  def robot_state(self):return {'joints':[0]*5,'gripper_openness':.2,'holding_status':'verified_held'}
+  def planning_held_object(self):return 'red'
+ class Fresh(Source):
+  def ensure_brain_scene(self):return self.brain_scene()
+ e=Current();b=Brain('status');s=TaskService(scene_source=Fresh(),brain=b,executor=e)
+ s.submit('现在拿着什么',execute=False);r=wait(s)
+ assert e.reconciled and b.seen[0][0]['held_object']=='red'
+ assert b.seen[0][0]['robot_state']['holding_status']=='verified_held'
+ event=next(x for x in r['events'] if isinstance(x['detail'],dict) and x['detail'].get('phase')=='holding_reacquisition')
+ assert 'certificate' not in event['detail']['holding']

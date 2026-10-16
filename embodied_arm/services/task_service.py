@@ -12,6 +12,7 @@ TERMINAL = {'completed', 'plan_preview', 'blocked', 'failed', 'cancelled'}
 SMALL_TALK = frozenset(('你好','您好','嗨','谢谢','感谢','hello','hi','thanks','thank you'))
 OBSERVATION_ERRORS = {'vision_unavailable','network_error','timeout','expired','call_budget_exhausted',
     'landmark_uncertain','occluded','occluded_or_missing_feature','uncertain_detection','low_confidence',
+    'rgb_face_refinement_rejected','triangulation_rejected','frame_mismatch','invalid_response','vision_rejected','rgb_tracking_rejected',
     'unavailable','scene_stale','scene_changed_during_vision','invalid_or_stale_frame','stale_frame','observation_unavailable'}
 
 class TaskService:
@@ -34,6 +35,7 @@ class TaskService:
         self.thread = None
         self.cancel_event = threading.Event()
         self.history = []
+        self.runtime_notices = []
         self.plan_binding=None
         self.record = {'id': None, 'state': 'idle', 'events': [], 'plan': None, 'error': None, 'execute': False}
 
@@ -50,11 +52,17 @@ class TaskService:
             if self.plan_binding is not None:
                 try:plan_fresh=self._binding(self.source.snapshot())==self.plan_binding
                 except ValueError:pass
-            return deepcopy({**self.record, 'plan_fresh':plan_fresh, 'history': self.history, 'pending': bool(self.thread and self.thread.is_alive()), 'execution_validation':'experimental_simulation' if getattr(self.executor,'experimental_simulation',False) else 'validated' if getattr(self.executor,'validated',False) else 'unvalidated', 'execution_available': ready['available'], 'unavailable_reason': ready['reason']})
+            return deepcopy({**self.record, 'plan_fresh':plan_fresh, 'history': self.history, 'runtime_notices':self.runtime_notices, 'pending': bool(self.thread and self.thread.is_alive()), 'execution_validation':'experimental_simulation' if getattr(self.executor,'experimental_simulation',False) else 'validated' if getattr(self.executor,'validated',False) else 'unvalidated', 'execution_available': ready['available'], 'unavailable_reason': ready['reason']})
 
     def _runtime_scene(self, scene, execute):
         if not getattr(self.executor,'experimental_simulation',False):return scene
         scene=deepcopy(scene)
+        robot_state=getattr(self.executor,'robot_state',None)
+        if robot_state:
+            value=robot_state()
+            if value is not None:
+                from embodied_arm.providers.brain import validate_robot_state
+                scene['robot_state']=validate_robot_state(value)
         scene['runtime_capabilities']={'robot_name':'SO-ARM101','execution_requested':execute,'experimental':True,
             'supported_actions':['pick','place']+(['sequence'] if getattr(self.executor,'supports_sequences',False) else []),
             'supported_targets':getattr(self.executor,'supported_targets',['goal']),
@@ -97,7 +105,7 @@ class TaskService:
             self.plan_binding=None
             generation = self.generation
             self.cancel_event = threading.Event()
-            self.record = {'id': uuid.uuid4().hex, 'state': 'queued', 'events': [], 'plan': None, 'error': None, 'execute': execute, 'motion_executed':False, 'replans':0, 'controller_calls':0,'cycle_reviews':0,'cycle_index':0,'cycle_max_calls':self.cycle_max_calls,'max_controller_calls':self.max_controller_calls}
+            self.record = {'id': uuid.uuid4().hex, 'state': 'queued', 'events': [], 'plan': None, 'error': None, 'execute': execute, 'motion_executed':False, 'replans':0, 'controller_calls':0,'controller_actions':0,'cycle_reviews':0,'cycle_index':0,'cycle_max_calls':self.cycle_max_calls,'max_controller_calls':self.max_controller_calls}
             history = deepcopy(self.history[-6:])
             self.history.append({'role': 'user', 'content': text.strip()})
             self.history = self.history[-20:]
@@ -123,6 +131,15 @@ class TaskService:
             elif ensure is not None:
                 try:scene=self.source.brain_scene()
                 except ValueError:pass
+            if scene.get('observation_status')!='unavailable':
+                reconcile=getattr(self.executor,'reconcile_observation',None)
+                if reconcile:
+                    if cancel.is_set():return
+                    holding=reconcile()
+                    if cancel.is_set():return
+                    if isinstance(holding,dict):
+                        public_holding={key:holding.get(key) for key in ('verified','reason','holding_state')}
+                        if not self._event(generation,'observing',{'phase':'holding_reacquisition','holding':public_holding}):return
             scene=self._runtime_scene(scene,execute)
             known_scene=scene.get('observation_status')!='unavailable'
             phase = 'planning'
@@ -185,9 +202,15 @@ class TaskService:
                             forwarded['calls']=base_calls+observed_calls
                             with self.lock:
                                 if generation==self.generation and not cancel.is_set():
+                                    forwarded['calls']=max(self.record.get('controller_calls',0),forwarded['calls'])
                                     self.record['controller_calls']=forwarded['calls']
                         if type(observed_actions) is int and observed_actions >= 0:
                             forwarded['actions']=base_actions+observed_actions
+                            with self.lock:
+                                if generation==self.generation and not cancel.is_set():
+                                    forwarded['actions']=max(self.record.get('controller_actions',0),forwarded['actions'])
+                                    self.record['controller_actions']=forwarded['actions']
+                                    self.record['motion_executed']=bool(forwarded['actions'])
                     return self._event(generation,'executing',forwarded)
                 kwargs={'cancel_event':cancel, 'event_callback':execution_event}
                 if bounded and getattr(self.executor,'supports_cycles',False):
@@ -203,6 +226,7 @@ class TaskService:
                 with self.lock:
                     if generation != self.generation:return
                     self.record['controller_calls']=total_calls
+                    self.record['controller_actions']=total_actions
                     self.record['outcome']=deepcopy(outcome)
                     self.record['motion_executed']=bool(total_actions)
                 if self.clock() >= deadline:raise ValueError('time_budget')
@@ -243,6 +267,10 @@ class TaskService:
                         'held_verified':holding in ('held_verified','empty'),'phase':phase_name,
                         'residual_xyz_m':None,'stop_reason':'cycle_budget','observation_status':'fresh',
                         'recent_actions':outcome.get('recent_actions',[])[-8:]}
+                    progress=outcome.get('progress',[])
+                    if progress:
+                        feedback['cycle_context']['progress']=progress[-8:]
+                        if progress[-1].get('phase')==phase_name:feedback['cycle_context']['residual_xyz_m']=progress[-1]['error_end_xyz_m']
                 brain_started=self.clock()
                 result=self.brain.replan(text,scene,previous,feedback,history)
                 with self.lock:
@@ -286,6 +314,11 @@ class TaskService:
             with self.lock:
                 if generation == self.generation:
                     self.record['error'] = reason
+                    failure_state='blocked' if phase=='observing' or reason=='unsupported_task' else 'failed'
+                    self.runtime_notices.append({'kind':'task_failure','request_id':self.record['id'],
+                        'request_text':text[:200],'state':failure_state,'reason':reason,
+                        'motion_executed':bool(self.record.get('motion_executed')),'at':self.clock()})
+                    self.runtime_notices=self.runtime_notices[-20:]
             self._event(generation, 'blocked' if phase == 'observing' or reason == 'unsupported_task' else 'failed', reason)
         finally:
             if execute and self.executor is not None:
@@ -295,7 +328,7 @@ class TaskService:
 
     def reset(self):
         self.stop()
-        with self.lock:self.history.clear()
+        with self.lock:self.history.clear();self.runtime_notices.clear()
         if self.executor is not None and hasattr(self.executor,'reset'):self.executor.reset()
         return self.status()
 

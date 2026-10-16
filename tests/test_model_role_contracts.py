@@ -138,3 +138,56 @@ def test_singleton_place_can_confirm_paused_stack_without_fabricated_holding():
         with pytest.raises(ValueError): brain.validate_plan({**plan, 'target_id': target}, scene)
     with pytest.raises(ValueError): brain.validate_plan(plan, {**SCENE, 'runtime_capabilities': CAP})
     with pytest.raises(ValueError): brain.validate_plan({**PLAN, 'target_id': 'on:blue'}, scene)
+
+
+PROGRESS = {'phase': 'descend', 'goal_start_xyz_m': [.2, 0, .01], 'goal_end_xyz_m': [.2, 0, .01],
+    'error_start_xyz_m': [.01, 0, -.04], 'error_end_xyz_m': [.005, 0, -.02],
+    'object_start_xyz_m': [.2, 0, .01], 'object_end_xyz_m': [.2, 0, .01], 'observations': 5}
+ROBOT_STATE = {'joints': [0, .1, -.1, .2, 0], 'gripper_openness': .4, 'holding_status': 'unknown'}
+
+
+def test_progress_and_current_robot_state_survive_ipc_and_prompt():
+    scene = {**SCENE, 'robot_state': ROBOT_STATE}
+    feedback = {**FEEDBACK, 'cycle_context': {**CYCLE, 'progress': [PROGRESS]}}
+    normalized = normalize_input('继续', scene, previous_plan=PLAN, feedback=feedback)
+    assert normalized['scene']['robot_state'] == ROBOT_STATE
+    assert normalized['feedback']['cycle_context']['progress'] == [PROGRESS]
+    preview = brain.request_preview('继续', scene, previous_plan=PLAN, feedback=feedback)
+    prompt = preview['body']['messages'][0]['content']
+    for phrase in ('由你判断实际进展', '同一phase、同一局部目标', '目标移动与机械臂进展', '残差缩小不等于', 'Stop后这些是当前状态'):
+        assert phrase in prompt
+    normalized['feedback']['cycle_context']['progress'][0]['error_end_xyz_m'][0] = 1
+    normalized['scene']['robot_state']['joints'][0] = 1
+    assert PROGRESS['error_end_xyz_m'][0] == .005 and ROBOT_STATE['joints'][0] == 0
+    assert brain.validate_cycle_context(CYCLE) == CYCLE
+
+
+@pytest.mark.parametrize('change', [{'observations': 0}, {'observations': 1001}, {'observations': True},
+    {'phase': 'step_boundary'}, {'goal_end_xyz_m': [1.001, 0, 0]}, {'error_start_xyz_m': [float('inf'), 0, 0]},
+    {'object_end_xyz_m': [True, 0, 0]}, {'object_start_xyz_m': None}, {'progress_verdict': 'success'}])
+def test_invalid_progress_evidence_rejected(change):
+    with pytest.raises(ValueError): brain.validate_cycle_context({**CYCLE, 'progress': [{**PROGRESS, **change}]})
+
+
+def test_progress_bounded_entries_and_explicit_changing_goals():
+    with pytest.raises(ValueError): brain.validate_cycle_progress([PROGRESS] * 9)
+    assert brain.validate_cycle_progress([]) == []
+    changed = {**PROGRESS, 'goal_end_xyz_m': [.21, 0, .01], 'observations': 1}
+    assert brain.validate_cycle_progress([changed]) == [changed]
+    assert brain.validate_cycle_progress([{**PROGRESS, 'error_end_xyz_m': [-1, 0, 1]}])
+
+
+@pytest.mark.parametrize('change', [{'joints': [0]*4}, {'joints': [0, 0, 0, 0, float('nan')]},
+    {'joints': [True, 0, 0, 0, 0]}, {'gripper_openness': True}, {'gripper_openness': 1.01},
+    {'holding_status': 'held'}, {'raw': 'not allowed'}])
+def test_invalid_robot_state_rejected(change):
+    with pytest.raises(ValueError): brain.scene_snapshot({**SCENE, 'robot_state': {**ROBOT_STATE, **change}})
+
+
+def test_robot_state_never_fabricates_holding_or_visual_scene():
+    unknown = {'observation_status': 'unavailable', 'blocks': {}, 'robot_state': ROBOT_STATE}
+    assert brain.scene_snapshot(unknown) == unknown
+    with pytest.raises(ValueError): brain.validate_plan(PLAN, unknown)
+    with pytest.raises(ValueError): brain.scene_snapshot({**SCENE, 'held_object': 'red', 'robot_state': ROBOT_STATE})
+    verified = {**SCENE, 'held_object': 'red', 'robot_state': {**ROBOT_STATE, 'holding_status': 'verified_held'}}
+    assert brain.scene_snapshot(verified)['held_object'] == 'red'

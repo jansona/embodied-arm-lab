@@ -23,7 +23,7 @@ can only increase the baseline image uncertainty formula; stereo's independent
 2px floor is untouched. No production caller selects this profile implicitly.
 """
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 import math
 from typing import Sequence
@@ -55,6 +55,8 @@ class ScaleAwareRefinement(FaceRefinement):
     discarded_bright_component_areas: tuple[int, ...] = ()
     discarded_bright_area_fraction: float = 0.
     discarded_bright_max_distance_px: float = 0.
+    search_expanded: bool = False
+    initial_roi_bounds: tuple[int, int, int, int] | None = None
 
 
 def _all_components(binary):
@@ -175,11 +177,12 @@ def _quadrilateral(contour):
 
 
 def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float],
-                        confidence: float, width: int, height: int) -> ScaleAwareRefinement:
+                        confidence: float, width: int, height: int, search_radius_px: int | None = None) -> ScaleAwareRefinement:
     """Refine a Qwen coarse point to an observed face centre, in native pixels.
 
     The ROI is fixed by image dimensions and the AI point (7% of image width for
-    cubes, 10% for the marker). Never search outside it or use a world reference.
+    cubes, 10% for the marker). An explicit bounded retry may double the crop,
+    while retaining the original near-anchor identity gate. No world reference enters.
     Returned corners are cyclic; centre is diagonal intersection, not the image
     centroid, because the physical square centre projects projectively.
     """
@@ -195,7 +198,10 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
     if not isinstance(jpeg, bytes) or not 1 <= len(jpeg) <= 8*1024*1024:
         raise ValueError('Expected bounded JPEG bytes')
     coarse = (float(uv_1000[0]*(width-1)/1000), float(uv_1000[1]*(height-1)/1000))
-    radius = max(24, math.ceil(width*(.10 if object_id == 'goal' else .07)))
+    anchor_radius = max(24, math.ceil(width*(.10 if object_id == 'goal' else .07)))
+    radius=anchor_radius if search_radius_px is None else search_radius_px
+    if type(radius) is not int or not anchor_radius<=radius<=2*anchor_radius:
+        raise ValueError('Search radius outside bounded expansion')
     roi = (max(0, math.floor(coarse[0]-radius)), max(0, math.floor(coarse[1]-radius)),
            min(width, math.ceil(coarse[0]+radius+1)), min(height, math.ceil(coarse[1]+radius+1)))
     def reject(reason):
@@ -224,7 +230,7 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
     plausible = []
     for points in components:
         near = float(np.min(np.linalg.norm(points-local_coarse, axis=1)))
-        if near <= radius*.5:
+        if near <= anchor_radius*.5:
             plausible.append((near, points))
     if not plausible:
         return reject('no_coloured_region_near_ai_point')
@@ -322,7 +328,31 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
         return reject(str(exc) if str(exc) in known else 'invalid_face_geometry')
 
 
-def refine_packet(packet: dict, canonical_ai_detections: Sequence) -> RefinedPacket:
+def refine_with_bounded_expansion(jpeg, *, capture_bounds=None, **kwargs):
+    """One same-image retry for a clipped crop, never for another rejection.
+
+    Caller must provide actual RGB covering the expanded area (full sensor or
+    padded native-coordinate capture). This cannot recover pixels outside the
+    sensor, occluded faces, or incomplete shapes. All fit gates are unchanged.
+    """
+    radius=max(24,math.ceil(kwargs['width']*(.10 if kwargs['object_id']=='goal' else .07)))
+    uv=kwargs['uv_1000'];width,height=kwargs['width'],kwargs['height']
+    point=(uv[0]*(width-1)/1000,uv[1]*(height-1)/1000)
+    def covered(r):
+        if capture_bounds is None:return True
+        x0,y0,x1,y1=capture_bounds
+        return (x0<=max(0,math.floor(point[0]-r)) and y0<=max(0,math.floor(point[1]-r))
+                and x1>=min(width,math.ceil(point[0]+r+1))
+                and y1>=min(height,math.ceil(point[1]+r+1)))
+    if not covered(radius):
+        return ScaleAwareRefinement(kwargs['object_id'],False,'roi_capture_coverage_missing',point,tuple(capture_bounds))
+    initial=refine_rgb_landmark(jpeg,**kwargs)
+    if initial.reason!='roi_clipped' or not covered(2*radius):return initial
+    expanded=refine_rgb_landmark(jpeg,**kwargs,search_radius_px=2*radius)
+    return replace(expanded,search_expanded=True,initial_roi_bounds=initial.roi_bounds)
+
+
+def refine_packet(packet: dict, canonical_ai_detections: Sequence, *, expand_clipped=False, capture_roi_bounds=None, expanded_camera_ids=None) -> RefinedPacket:
     """Adapt RGB image packet + canonical AI pixels to canonical refined pixels.
 
     Caller owns frame freshness and generation checks. This helper never receives
@@ -369,8 +399,11 @@ def refine_packet(packet: dict, canonical_ai_detections: Sequence) -> RefinedPac
         if any(type(v) is not int or v <= 1 for v in (width, height)):
             raise ValueError('Invalid camera dimensions')
         normalized = [detection.uv[0]/(width-1)*1000, detection.uv[1]/(height-1)*1000]
-        result = refine_rgb_landmark(raw, object_id=detection.object_id, uv_1000=normalized,
-                                     confidence=detection.confidence, width=width, height=height)
+        expand_this=expand_clipped and (expanded_camera_ids is None or detection.camera_id in expanded_camera_ids)
+        fit=refine_with_bounded_expansion if expand_this else refine_rgb_landmark
+        result = fit(raw, object_id=detection.object_id, uv_1000=normalized,
+                                     confidence=detection.confidence, width=width, height=height,
+                     **({'capture_bounds':None if capture_roi_bounds is None else capture_roi_bounds[detection.camera_id]} if expand_this else {}))
         evidence.append(result)
         refined.append(PixelDetection(detection.object_id, detection.camera_id, detection.frame_id,
                                       result.uv if result.accepted else None,

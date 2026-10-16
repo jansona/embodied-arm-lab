@@ -263,7 +263,10 @@ def test_second_review_uses_revised_server_owned_plan_not_original_tail():
 
 def test_release_pending_cannot_reuse_old_lift_certificate_for_planning(monkeypatch):
     sim,_,executor,_=resumable_fixture(monkeypatch)
-    executor.held='red';executor.held_evidence={'epoch':sim.proprioception()['epoch']}
+    executor.held='red';executor.holding_status='verified_held'
+    executor.held_evidence={'object_id':'red','epoch':sim.proprioception()['epoch'],
+        'actions':sim.proprioception()['actions'],'frame_ids':{'left':'fixture-left','right':'fixture-right'},
+        'identity_token':'fixture-identity','verified_lift':True,'source':'phase_scoped_temporal_rgb'}
     assert executor.planning_held_object()=='red'
     executor._run_state={'holding_state':'release_pending'}
     assert executor.planning_held_object() is None

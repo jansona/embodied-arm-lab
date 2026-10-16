@@ -461,3 +461,11 @@ def test_singleton_current_plan_uses_canonical_server_owned_step_ids():
     last = run(executor, {**single(), 'step_id': 's3'}, resume_token=first['resume_token'])
     assert last['current_plan'] == first['current_plan']
     assert last['completed_step_ids'] == ['s1']
+
+def test_public_rgb_fit_diagnostic_strips_unrecognized_fields():
+    from embodied_arm.services.sequence_execution import _perception_diagnostic
+    result=_perception_diagnostic({'reason':'tracking_refinement_failed','raw_response':'secret',
+        'fits':[{'object_id':'blue','camera_id':'right','reason':'roi_clipped','accepted':False,
+                 'roi_bounds':[1,2,3,4],'uv':[float('nan'),1],'api_key':'secret'}]})
+    assert result=={'reason':'tracking_refinement_failed','fits':[{'object_id':'blue','camera_id':'right',
+        'reason':'roi_clipped','accepted':False,'roi_bounds':[1,2,3,4]}]}

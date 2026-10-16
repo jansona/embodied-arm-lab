@@ -92,3 +92,47 @@ def test_applied_micro_history_is_retained_when_post_motion_perception_fails():
     result=executor.execute(PLAN)
     assert not result['verified'] and result['actions']==1
     assert result['recent_actions']==[{'action':'x_plus','applied':True}]
+
+
+def test_recovery_reports_active_driver_counts_and_original_fault():
+    executor,observer,driver=fixture();events=[]
+    driver.gripper=lambda *a,**k:{'status':'completed','calls':1,'actions':0,'provenance':'offline_fixture'}
+    def move(*args,**kwargs):
+        callback=kwargs['event_callback']
+        callback({'phase':'jev_decision','action':'x_minus','calls':3,'actions':2})
+        callback({'phase':'motion_applied','applied':True,'calls':3,'actions':3})
+        failures=iter(['Static RGB association lost: tracking_refinement_failed','Moving RGB anchors unavailable'])
+        def fail():
+            observer.last_error=next(failures)
+            raise ValueError(observer.last_error)
+        observer.observe=fail
+        try:kwargs['after_motion']()
+        except ValueError:pass
+        return {'status':'stopped','reason':'perception_rejected','calls':3,'actions':3,'provenance':'offline_fixture'}
+    driver.move_to=move
+    result=executor.execute(PLAN,event_callback=events.append)
+    recovery=next(e for e in events if e['phase']=='observation_recovery')
+    assert (recovery['calls'],recovery['actions'])==(4,3)
+    assert recovery['first_error']=='Static RGB association lost: tracking_refinement_failed'
+    assert result['perception_detail']==recovery['first_error']
+    assert result['recovery_detail']=='Moving RGB anchors unavailable'
+    assert (result['calls'],result['actions'])==(4,3)
+
+
+def test_cycle_progress_records_measured_error_and_changed_goal_without_verdict():
+    from embodied_arm.providers.brain import validate_cycle_progress
+    executor,observer,driver=fixture()
+    def move(*args,**kwargs):
+        callback=kwargs['event_callback']
+        for goal,error in (([.193,-.047,.06],[-.02,0,0]),([.194,-.047,.06],[-.01,0,0])):
+            kwargs['before_decision']()
+            callback({'phase':'observation','kind':'cartesian','goal':goal,'error_xyz_m':error,'calls':1,'actions':0})
+        return {'status':'stopped','reason':'test_stop','calls':1,'actions':0}
+    driver.move_to=move
+    result=executor.execute(PLAN)
+    progress=validate_cycle_progress(result['progress'])
+    assert len(progress)==1 and progress[0]['observations']==2
+    assert progress[0]['goal_start_xyz_m']!=progress[0]['goal_end_xyz_m']
+    assert progress[0]['error_start_xyz_m']==[-.02,0,0]
+    assert progress[0]['error_end_xyz_m']==[-.01,0,0]
+    assert 'verified' not in progress[0] and result['verified'] is False

@@ -6,3 +6,5 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#09131e;padding:12px;
 .composer{margin-top:24px}.actions{flex-wrap:wrap}summary{cursor:pointer;color:#c9e6ee;padding:8px 0}#advanced-diagnostics{border:1px solid #2b3b4e;border-radius:12px;padding:16px;margin-top:16px}#advanced-diagnostics>.layout{margin-top:16px}#execution-readiness,#plan-status{color:#c1d6e6}#structured-plan li,.timeline li{margin:8px 0}#execution-events{max-height:320px;overflow:auto}#workflow-status{font-size:18px;font-weight:600}.composer textarea{min-height:84px}
 
 .execution-notice{padding:12px 14px;border:1px solid #9a7945;background:#302a20;border-radius:10px;color:#ffe5b5}#preview-tools{margin-top:16px}#simulation-warning{color:#d2b98f}
+
+#runtime-notices{max-height:280px;overflow:auto}.runtime-notice{padding:10px 12px;border-left:3px solid #b58c47;background:#302a20;white-space:pre-wrap;overflow-wrap:anywhere}

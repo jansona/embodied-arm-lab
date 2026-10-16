@@ -51,7 +51,7 @@ class SO101Session:
         if task_executor is not None and task_executor_factory is not None:raise ValueError('Choose one task executor injection')
         if task_executor_factory is not None:task_executor=task_executor_factory(sim,self.source,controller)
         self.task_service=TaskService(scene_source=self.source,brain=brain,executor=task_executor,
-            max_controller_calls=200,max_seconds=420,cycle_max_calls=16,max_cycle_reviews=8)
+            max_controller_calls=200,max_seconds=420,cycle_max_calls=int(os.environ.get('SO101_CYCLE_MAX_CALLS','32')),max_cycle_reviews=8)
     def _pending(self):
         return bool((self.worker and self.worker.is_alive()) or self.task_service.status()['pending'])
     def _controller_status(self):

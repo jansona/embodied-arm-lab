@@ -218,3 +218,45 @@ def test_applied_command_does_not_imply_settled_or_visually_verified():
     value=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify(formatLoopEvent('+json.dumps(detail)+')));'],text=True))
     assert '指令已施加，运动与视觉结果待确认' in value
     assert '已应用 3 步' in value and '成功' not in value and '已验证' not in value
+
+
+def test_sequence_failure_shows_both_perception_errors_without_speculation():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    outcome={'verified':False,'reason':'fresh_rgb_rejected','calls':5,'actions':3,'failure':{'step_id':'s1','phase':'approach','reason':'fresh_rgb_rejected','first_perception_error':'landmark_uncertain','retry_perception_error':'rgb_geometry_rejected','driver_reason':'fresh_rgb_rejected'},'decision_provenance':['unverified']}
+    event={'phase':'observation_recovery','attempt':1,'calls':4,'actions':3,'first_error':'landmark_uncertain','retry_error':'rgb_geometry_rejected'}
+    code=helper+'\nconsole.log(JSON.stringify([formatExecutionOutcome('+json.dumps(outcome)+'),formatLoopEvent('+json.dumps(event)+'),formatProvenance("unverified")]));'
+    values=json.loads(subprocess.check_output(['node','-e',code],text=True))
+    assert '失败步骤：s1' in values[0] and '失败阶段：approach' in values[0]
+    assert all('首次视觉错误：landmark_uncertain' in v and '重试视觉错误：rgb_geometry_rejected' in v for v in values[:2])
+    assert '缺少来源验证元数据' in values[2] and '不能据此判断' in values[2]
+    assert '遮挡导致' not in values[0] and '任务成功' not in values[0]
+
+
+def test_failure_notice_survives_next_request_and_input_waits_for_stop_ack():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    code=source[:source.index('async function state()')]
+    dom="const elements={};global.document={getElementById:(id)=>elements[id]||(elements[id]={children:[],replaceChildren(){this.children=[]},appendChild(v){this.children.push(v)}}),createElement:()=>({})};"
+    notice={'kind':'task_failure','request_id':'failed01','request_text':'夹起红色方块','state':'blocked','reason':'observation_unavailable','motion_executed':False}
+    state={'robot':{},'perception':{'worker':{}},'brain':{},'controller':{},'task':{},'chat':{'available':True},'workflow':{'id':'newtask2','state':'observing','execution_available':True,'runtime_notices':[notice]},'pending':True}
+    script=dom+code+'\nconst s='+json.dumps(state)+''' ;elements.request={value:'保留草稿'};const states=[];for(const phase of ['observing','planning','executing','replanning','stopping']){s.workflow.state=phase;render(s);states.push({input:elements.request.disabled,submit:elements['task-send'].disabled,stop:elements.stop.disabled})}s.workflow.state='cancelled';render(s);const awaiting=elements.request.disabled;s.pending=false;render(s);console.log(JSON.stringify({states,awaiting,unlocked:!elements.request.disabled,draft:elements.request.value,notice:elements['runtime-notices'].children[0].textContent,id:elements['request-id'].textContent,stopDisabled:elements.stop.disabled}));'''
+    value=json.loads(subprocess.check_output(['node','-e',script],text=True))
+    assert all(x['input'] and x['submit'] and not x['stop'] for x in value['states'])
+    assert value['awaiting'] and value['unlocked'] and value['stopDisabled']
+    assert value['draft']=='保留草稿'
+    assert '请求 failed01' in value['notice'] and '系统反馈' in value['notice']
+    assert '本次未执行动作' in value['notice'] and '重新提交' in value['notice']
+    assert 'newtask2' in value['id']
+
+
+def test_bounded_visual_failure_evidence_identifies_object_camera_without_raw_dump():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    evidence={'reason':'rgb_face_refinement_rejected','fits':[{'object_id':'blue','camera_id':'right','reason':'roi_clipped','accepted':False,'roi_bounds':[1,2,3,4]},{'object_id':'red','camera_id':'left','reason':'ok','accepted':True}],'landmarks':[{'object_id':'blue','reason':'excessive_3d_uncertainty'}]}
+    code=helper+'\nconsole.log(JSON.stringify([formatExecutionOutcome({failure:{perception_evidence:'+json.dumps(evidence)+'}}),...'+json.dumps(['holding_state_unknown','rgb_face_refinement_rejected','triangulation_rejected','frame_mismatch','invalid_response','vision_rejected','rgb_tracking_rejected'])+'.map(formatTaskError)]));'
+    values=json.loads(subprocess.check_output(['node','-e',code],text=True))
+    assert '蓝色方块 / 相机 right：roi_clipped' in values[0]
+    assert '三维重建 蓝色方块：excessive_3d_uncertainty' in values[0]
+    assert 'roi_bounds' not in values[0] and '红色方块' not in values[0]
+    assert '场景未重置' in values[1] and '无法确认' in values[1]
+    assert all('rejected' not in value for value in values[2:])

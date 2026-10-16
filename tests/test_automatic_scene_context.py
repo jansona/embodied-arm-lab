@@ -45,7 +45,8 @@ def test_cancelled_tracking_never_falls_back_to_paid_refresh():
     with pytest.raises(ValueError,match='cancelled'):s.ensure_brain_scene()
     assert s.refreshes==0
 
-@pytest.mark.parametrize('reason',['network_error','timeout','landmark_uncertain','private detail'])
+@pytest.mark.parametrize('reason',['network_error','timeout','landmark_uncertain','rgb_face_refinement_rejected',
+ 'triangulation_rejected','frame_mismatch','invalid_response','vision_rejected','private detail'])
 def test_failure_is_allowlisted_and_does_not_reach_brain(reason):
     s=source()
     def fail(**kwargs):s.reason=reason;raise RuntimeError('Never expose this body')

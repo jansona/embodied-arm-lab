@@ -75,7 +75,9 @@ class CameraSceneSource:
             reason=self.status()['reason']
             allowed={'network_error','timeout','expired','call_budget_exhausted','landmark_uncertain',
                      'occluded','occluded_or_missing_feature','uncertain_detection','low_confidence',
-                     'unavailable','scene_changed_during_vision','invalid_or_stale_frame','stale_frame'}
+                     'unavailable','scene_changed_during_vision','invalid_or_stale_frame','stale_frame',
+                     'rgb_face_refinement_rejected','triangulation_rejected','frame_mismatch',
+                     'invalid_response','vision_rejected'}
             raise ValueError(reason if reason in allowed else 'observation_unavailable') from None
         return self.brain_scene()
 
@@ -96,7 +98,7 @@ class CameraSceneSource:
                 from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
                 current=self.sim.camera_calibrations()
                 seeds=self.tracker.projected_seeds(current)
-                self.tracking_rois=bounds_from_detections(current,seeds,self.required_objects)
+                self.tracking_rois=bounds_from_detections(current,seeds,self.required_objects,radius_scale=2,expanded_camera_ids=('right',))
             packet=self.sim.capture_frames(roi_bounds=self.tracking_rois) if tracking and self.tracking_rois else self.sim.capture_frames()
             if self.moving_wrist:
                 from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
@@ -107,7 +109,7 @@ class CameraSceneSource:
                 if generation!=self.generation:raise ValueError('cancelled')
             if tracking:
                 if not self.moving_wrist and packet['calibrations']!=self.tracker_calibrations:raise ValueError('Camera calibration changed')
-                refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock(),**({'calibrations':packet['calibrations']} if self.moving_wrist else {}))
+                refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock(),**({'calibrations':packet['calibrations'],'capture_roi_bounds':packet.get('observed_roi_bounds')} if self.moving_wrist else {}))
                 self._record_refinement(refined,tracking=True)
                 if not refined.accepted:raise ValueError('RGB tracking rejected')
                 detections=list(refined.detections)
@@ -138,7 +140,7 @@ class CameraSceneSource:
                         else RGBRegionTracker() if self.refinement_profile=='baseline'
                         else RGBRegionTracker(refinement_profile=self.refinement_profile))
                     failure='rgb_face_refinement_rejected'
-                    refined=self.tracker.start(vision_packet,detections,before['epoch'],now=self.clock(),required_objects=self.required_objects,**({'calibrations':packet['calibrations']} if self.moving_wrist else {}))
+                    refined=self.tracker.start(vision_packet,detections,before['epoch'],now=self.clock(),required_objects=self.required_objects,**({'calibrations':packet['calibrations'],'capture_roi_bounds':packet.get('observed_roi_bounds')} if self.moving_wrist else {}))
                     self._record_refinement(refined,tracking=False)
                     if not refined.accepted:raise ValueError('RGB face refinement rejected')
                     self.tracker_calibrations=packet['calibrations'];self.semantic_deadline=packet['captured_at']+60.
@@ -146,7 +148,7 @@ class CameraSceneSource:
                     if self.roi_tracking:
                         if not {'red','blue'}.issubset(self.required_objects):raise ValueError('ROI tracking requires both blocks')
                         from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
-                        self.tracking_rois=bounds_from_detections(packet['images'],detections,self.required_objects)
+                        self.tracking_rois=bounds_from_detections(packet['images'],detections,self.required_objects,**({'radius_scale':2,'expanded_camera_ids':('right',)} if self.moving_wrist else {}))
             failure='scene_changed_during_vision'
             after=robot_only(self.sim.proprioception())
             if (generation!=self.generation or not after['paused'] or after['busy']
@@ -167,6 +169,7 @@ class CameraSceneSource:
                 if generation!=self.generation:raise ValueError('Vision cancelled')
                 self.scene=scene;self.epoch=after['epoch'];self.actions=after['actions'];self.reason='estimated'
                 self.last_rgb_frames=tuple(frames);self.last_pixel_detections=tuple(detections)
+                self.last_capture_roi_bounds=packet.get('observed_roi_bounds')
             return self.snapshot()
         except Exception:
             with self.lock:

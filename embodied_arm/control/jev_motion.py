@@ -139,6 +139,7 @@ class JevMotionDriver:
                     callback({'phase':'observation','iteration':iteration,'kind':kind,
                               'frame_ids':scene.get('frame_ids'),'observation_age_seconds':age,
                               'goal':list(target) if kind=='cartesian' else target,
+                              'error_xyz_m':[a-b for a,b in zip(target,robot['ee'])] if kind=='cartesian' else None,
                               'calls':result['calls'],'actions':result['actions']})
                 self._check(cancel,deadline)
                 if kind == 'cartesian':
