@@ -167,6 +167,8 @@ class SO101Robot:
     def solve_ik(self, xyz, approach=(0, 0, -1), seed=None):
         """Find a bounded pose, rejecting unreachable targets instead of silent clipping.
 
+        The solver targets 20 micrometers and rejects final residual above 100
+        micrometers; this is numerical IK accuracy, not hardware accuracy.
         The 5-DOF arm cannot realize arbitrary 6D poses. Only TCP +Z direction
         is constrained alongside position; rotation about that axis remains free.
         """
@@ -195,7 +197,7 @@ class SO101Robot:
                     best = (error, q.copy(), t.copy())
                 pos_error = float(np.linalg.norm(target-t[:3, 3]))
                 axis_error = math.acos(float(np.clip(direction @ t[:3, 2], -1, 1)))
-                if pos_error < .0005 and axis_error < .02:
+                if pos_error < .00002 and axis_error < .001:
                     self.last_ik = {"position_residual_m": pos_error, "approach_residual_rad": axis_error}
                     return q.tolist()
                 jac = np.vstack((jp, weight*ja))
@@ -215,7 +217,7 @@ class SO101Robot:
         pos_error = float(np.linalg.norm(target-t[:3, 3]))
         axis_error = math.acos(float(np.clip(direction @ t[:3, 2], -1, 1)))
         self.last_ik = {"position_residual_m": pos_error, "approach_residual_rad": axis_error}
-        if pos_error > .002 or axis_error > .06:
+        if pos_error > .0001 or axis_error > .005:
             raise ValueError(f"SO-ARM101 target unreachable: position residual {pos_error:.4f} m, approach residual {axis_error:.3f} rad")
         return q.tolist()
 

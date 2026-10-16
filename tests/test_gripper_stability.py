@@ -2,7 +2,7 @@
 import math
 import pybullet as p
 from simulator import Simulation
-from gripper_stability_diagnostic import run
+from experiments.gripper_stability_diagnostic import run
 
 
 def test_reset_has_exactly_one_robot_only_finger_linkage():

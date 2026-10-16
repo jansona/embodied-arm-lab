@@ -217,7 +217,8 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
     else:
         dominant, other_a, other_b = g, r, b
     chroma = dominant-(other_a+other_b)/2
-    colour = (dominant >= 55) & (chroma >= 32) & (dominant > 1.25*other_a) & (dominant > 1.25*other_b)
+    from rgb_semantic_colour import semantic_colour_mask
+    colour = semantic_colour_mask(rgb, object_id)
     components = _components(colour)
     local_coarse = np.asarray(coarse)-roi[:2]
     plausible = []

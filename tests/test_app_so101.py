@@ -183,3 +183,147 @@ def test_stop_discards_pending_waypoint_completion():
         c.post('/api/control',json={'action':'stop'});gate.set();time.sleep(.03)
         s=c.get('/api/state').json()
         assert s['task']['status']=='stopped' and s['waypoint']['status']=='stopped'
+
+
+def test_chat_works_without_scene_and_passes_history_without_motion():
+    import time
+    from brain import BrainResult,BrainPlan
+    class Brain:
+        def __init__(self):self.requests=[]
+        def status(self):return {'available':True,'model':'offline-test'}
+        def interpret(self,text,scene,history=None):
+            self.requests.append((text,scene,history))
+            return BrainResult(plan=BrainPlan(action='clarify',message='可以先告诉我你的需求。当前没有视觉观察。'),accepted=True,provenance='mock')
+    brain=Brain()
+    with TestClient(create_app(SafeSimulation,brain=brain)) as c:
+        assert c.get('/api/state').json()['chat']['available']
+        assert not c.get('/api/state').json()['task']['available']
+        assert c.post('/api/chat',json={'text':'你好'}).status_code==200
+        for _ in range(100):
+            s=c.get('/api/state').json()
+            if s['chat']['status']=='ready':break
+            time.sleep(.01)
+        assert s['chat']['status']=='ready' and len(s['chat']['messages'])==2
+        assert s['robot']['actions']==0 and not s['chat']['motion_enabled']
+        assert brain.requests[0][1]=={'observation_status':'unavailable','blocks':{}}
+        assert c.post('/api/chat',json={'text':'我想夹红色方块'}).status_code==200
+        for _ in range(100):
+            if len(brain.requests)==2:break
+            time.sleep(.01)
+        assert [m['role'] for m in brain.requests[1][2]]==['user','assistant']
+        assert c.post('/api/plan',json={'text':'夹红色方块'}).status_code==409
+
+
+def test_chat_pending_cancel_and_expired_worker_are_safe():
+    import threading,time
+    from brain import BrainResult,BrainPlan
+    gate=threading.Event()
+    class Brain:
+        ready=True;calls=0
+        def status(self):return {'available':self.ready}
+        def interpret(self,*args,**kwargs):
+            self.calls+=1;gate.wait(2)
+            return BrainResult(plan=BrainPlan(action='status',message='迟到回复'),accepted=True)
+        def cancel(self):pass
+    brain=Brain()
+    with TestClient(create_app(SafeSimulation,brain=brain)) as c:
+        c.post('/api/chat',json={'text':'状态'})
+        assert c.post('/api/chat',json={'text':'重复'}).status_code==409
+        c.post('/api/control',json={'action':'stop'});gate.set();time.sleep(.03)
+        s=c.get('/api/state').json()
+        assert s['chat']['status']=='cancelled'
+        assert [m['role'] for m in s['chat']['messages']]==['user']
+        brain.ready=False
+        assert c.post('/api/chat',json={'text':'再来'}).status_code==409
+        assert brain.calls==1 and s['robot']['actions']==0
+
+
+def test_chat_rejects_actionable_reply_and_renders_no_motion():
+    import time
+    from brain import BrainResult,BrainPlan
+    class Brain:
+        def status(self):return {'available':True}
+        def interpret(self,*args,**kwargs):return BrainResult(plan=BrainPlan(action='pick',object_id='red',message='执行'),accepted=True)
+    with TestClient(create_app(SafeSimulation,brain=Brain())) as c:
+        c.post('/api/chat',json={'text':'抓红色'})
+        for _ in range(100):
+            s=c.get('/api/state').json()
+            if s['chat']['status']=='error':break
+            time.sleep(.01)
+        assert s['chat']['status']=='error' and len(s['chat']['messages'])==1
+        assert s['robot']['actions']==0 and s['task']['plan'] is None
+
+
+def test_one_text_task_observes_plans_executes_and_reports_verified_outcome():
+    import time
+    from brain import BrainResult,BrainPlan
+    trace=[]
+    class Source:
+        def __init__(self,sim,vision):pass
+        def status(self):return {'scene':None,'reason':'none'}
+        def refresh(self):trace.append('observe')
+        def brain_scene(self):return {'perception_source':'rgb_only'}
+        def snapshot(self):trace.append('fresh')
+        def cancel(self):pass
+    class Brain:
+        def status(self):return {'available':True}
+        def interpret(self,text,scene,history):
+            assert scene=={'perception_source':'rgb_only'};trace.append('plan')
+            return BrainResult(plan=BrainPlan(action='pick',object_id='red',message='测试动作计划'),accepted=True,provenance='mock')
+    class Executor:
+        validated=True
+        def execute(self,plan,*,cancel_event,event_callback):
+            trace.append('execute');event_callback({'phase':'lift','provenance':'mock_fixture'})
+            return {'verified':True,'source':'mock_fixture'}
+        def stop(self):pass
+    with TestClient(create_app(SafeSimulation,brain=Brain(),source_factory=Source,task_executor=Executor())) as c:
+        assert c.post('/api/tasks',json={'text':'夹起红色方块','execute':True}).status_code==200
+        for _ in range(100):
+            state=c.get('/api/state').json()
+            if state['workflow']['state']=='completed':break
+            time.sleep(.01)
+        assert trace==['observe','plan','fresh','execute']
+        assert state['workflow']['outcome']['verified']
+        assert [e['state'] for e in state['workflow']['events']]==['observing','planning','executing','executing','completed']
+        assert state['workflow']['provenance']=='mock'
+
+
+def test_unvalidated_task_execution_is_unavailable_without_model_call():
+    class Brain:
+        def status(self):return {'available':True}
+        def interpret(self,*args):raise AssertionError('No call')
+    with TestClient(create_app(SafeSimulation,brain=Brain())) as c:
+        assert c.post('/api/tasks',json={'text':'夹起红色方块','execute':True}).status_code==409
+        assert not c.get('/api/state').json()['workflow']['execution_available']
+
+
+def test_reset_clears_executor_held_state_but_stop_preserves_it():
+    class Executor:
+        validated=True
+        held='red';resets=0;stops=0
+        def stop(self):self.stops+=1
+        def reset(self):self.held=None;self.resets+=1
+    executor=Executor()
+    with TestClient(create_app(SafeSimulation,task_executor=executor)) as c:
+        assert c.post('/api/control',json={'action':'reset','seed':-1}).status_code==409
+        assert executor.held=='red' and executor.stops==0 and executor.resets==0
+        c.post('/api/control',json={'action':'stop'})
+        assert executor.held=='red' and executor.resets==0
+        c.post('/api/control',json={'action':'reset','seed':2})
+        assert executor.held is None and executor.resets==1
+        s=c.get('/api/state').json()
+        assert s['chat']['messages']==[] and s['robot']['paused']
+
+
+def test_task_executor_factory_receives_the_same_safe_runtime_dependencies():
+    seen=[];controller=object()
+    class Executor:
+        validated=False
+        def stop(self):pass
+    def factory(sim,scene_source,adapter):
+        seen.append((sim,scene_source,adapter));return Executor()
+    app=create_app(SafeSimulation,controller=controller,task_executor_factory=factory)
+    with TestClient(app) as c:
+        session=app.state.session
+        assert seen==[(session.sim,session.source,controller)]
+        assert not c.get('/api/state').json()['workflow']['execution_available']

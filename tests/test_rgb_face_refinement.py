@@ -134,7 +134,7 @@ def test_non_jpeg_or_mismatched_dimensions_rejected():
 
 
 def live_fixture():
-    root = Path(__file__).parent/'artifacts'
+    root = Path(__file__).resolve().parents[1]/'artifacts'
     paths = [root/'so101-vision-third-diagnostic.json',root/'so101-live-left.jpg',root/'so101-live-right.jpg']
     if not all(path.exists() for path in paths):
         pytest.skip('Fixed no-motion live RGB fixture not packaged')

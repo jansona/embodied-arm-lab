@@ -34,7 +34,9 @@ def camera_calibration(camera_id,width=640,height=480):
 
 
 class SO101Simulation:
-    def __init__(self,seed=0,*,camera_size=(640,480)):
+    def __init__(self,seed=0,*,camera_size=(640,480),illumination_profile="standard"):
+        if illumination_profile not in ("standard","shadow_free_rgb_v1"):raise ValueError("Unsupported illumination profile")
+        self.illumination_profile=illumination_profile
         if tuple(camera_size) not in ((640,480),(1280,960),(1920,1440)):raise ValueError('Unsupported stereo resolution')
         self.camera_size=tuple(camera_size)
         self.lock=threading.RLock();self.cid=p.connect(p.DIRECT);self.epoch=0
@@ -83,7 +85,7 @@ class SO101Simulation:
             from rgb_roi_geometry import frustum
             proj=p.computeProjectionMatrix(*frustum(roi,width,height));width=roi[2]-roi[0];height=roi[3]-roi[1]
         pixels=self.call(p.getCameraImage,width,height,viewMatrix=view,projectionMatrix=proj,
-                         renderer=p.ER_TINY_RENDERER,flags=p.ER_NO_SEGMENTATION_MASK,shadow=1)[2]
+                         renderer=p.ER_TINY_RENDERER,flags=p.ER_NO_SEGMENTATION_MASK,shadow=int(self.illumination_profile=="standard"))[2]
         rgb=np.asarray(pixels,dtype=np.uint8).reshape(height,width,4)[:,:,:3]
         if roi is not None:
             canvas=np.zeros((native_height,native_width,3),dtype=np.uint8)
@@ -126,7 +128,8 @@ class SO101Simulation:
             elif action in ('open','close'):goal=None
             else:raise ValueError('Unsupported SO101 command')
             self.queue.append({'joint_goal':goal,'gripper':1. if action=='open' else 0. if action=='close' else None,
-                               'ticks':144,'elapsed':0,'origin':origin})
+                               'ticks':360 if action in ('open','close') else 144,
+                               'settle_ticks':120 if action=='xyz' else 0,'elapsed':0,'origin':origin})
             self.actions+=1
     def resume(self):
         with self.lock:self.paused=False;self.status='Ready'
@@ -137,11 +140,16 @@ class SO101Simulation:
             self.paused=True
     def stop(self):
         with self.lock:
+            # Cancel an active gripper trajectory at its measured position.
+            # An idle/arm-only stop must retain a completed gripping setpoint:
+            # replacing it with the contact-limited encoder angle removes force.
+            freeze_gripper=bool(self.current and self.current.get('gripper') is not None)
             self.epoch+=1;self.queue.clear();self.current=None;self.paused=True;self.status='Stopped'
             self.robot.command_joints(self.robot.joint_positions())
-            angle=self.call(p.getJointState,self.robot.body_id,self.robot.gripper_joint_index)[0]
-            lo,hi=self.robot.gripper_limits
-            self.robot.command_gripper(max(0.,min(1.,(angle-lo)/(hi-lo))))
+            if freeze_gripper:
+                angle=self.call(p.getJointState,self.robot.body_id,self.robot.gripper_joint_index)[0]
+                lo,hi=self.robot.gripper_limits
+                self.robot.command_gripper(max(0.,min(1.,(angle-lo)/(hi-lo))))
             self.robot.apply_motors()
     def tick(self,count=4):
         with self.lock:
@@ -149,13 +157,36 @@ class SO101Simulation:
             for _ in range(count):
                 if self.current is None and self.queue:
                     self.current=self.queue.popleft();self.current['start']=list(self.robot.joint_positions())
-                    if self.current['gripper'] is not None:self.robot.command_gripper(self.current['gripper'])
+                    if self.current['gripper'] is not None:
+                        angle=self.call(p.getJointState,self.robot.body_id,self.robot.gripper_joint_index)[0]
+                        lo,hi=self.robot.gripper_limits
+                        self.current['gripper_start']=max(0.,min(1.,(angle-lo)/(hi-lo)))
                     self.status='Moving';self.origin=self.current['origin']
                 if self.current:
                     c=self.current;c['elapsed']+=1;t=min(1,c['elapsed']/c['ticks']);t=t*t*(3-2*t)
                     if c['joint_goal'] is not None:self.robot.command_joints([a+t*(b-a) for a,b in zip(c['start'],c['joint_goal'])])
-                    if c['elapsed']>=c['ticks']:self.current=None;self.status='Motion complete'
+                    if c['gripper'] is not None:
+                        self.robot.command_gripper(c['gripper_start']+t*(c['gripper']-c['gripper_start']))
+                    # Bounded 0.5s Cartesian servo dwell; app still owns physics.
+                    # Keep the same accepted target, never add a direction/action.
+                    if c['elapsed']>=c['ticks']+c.get('settle_ticks',0):self.current=None;self.status='Motion complete'
                 self.robot.apply_motors();self.call(p.stepSimulation);self.steps+=1
+    def grasp_geometry(self,target_xyz=None):
+        """Known jaw geometry + encoder FK, not an object/environment observation.
+
+        The horizontal approach offset avoids the fixed fingertip during descent.
+        Its sampled capture window is documented in SO101-GRASP-FEASIBILITY.md.
+        """
+        with self.lock:
+            joints=self.robot.joint_positions() if target_xyz is None else self.robot.solve_ik(target_xyz)
+            transform=self.robot.forward_kinematics(joints)
+            axis=[float(transform[0,0]),float(transform[1,0]),0.]
+            length=math.hypot(axis[0],axis[1])
+            if length<.9:raise ValueError('Top-down jaw orientation required')
+            shift=math.sqrt(2)*.01+.006+.002-.012
+            return {'approach_offset_world':[shift*x/length for x in axis],
+                    'tcp_below_top_m':.007,'transit_height_m':.06,
+                    'profile':'planar_fixed_jaw_clearance_v1'}
     def evaluation_state(self):
         """Oracle ONLY for independent scoring/debug. Never a controller input."""
         with self.lock:

@@ -296,11 +296,11 @@ class SO101IPCTests(unittest.TestCase):
         with self.assertRaises(ValueError): worker_run(adapter, max_seconds=.01)
         worker.join(5)
         self.assertFalse(worker_status()['available'])
-        for args in ({'max_calls': 0}, {'max_calls': 13}, {'max_calls': True},
-                     {'max_seconds': 181}, {'max_seconds': 0}, {'max_seconds': float('nan')}):
+        for args in ({'max_calls': 0}, {'max_calls': 201}, {'max_calls': True},
+                     {'max_seconds': 421}, {'max_seconds': 0}, {'max_seconds': float('nan')}):
             with self.assertRaises(ValueError): worker_run(FakeAdapter(), **args)
         with patch.object(SO101JevAdapter, 'from_config', side_effect=AssertionError('No loading')):
-            with self.assertRaises(SystemExit): main(['--config', '/fake/config', '--max-calls', '13'])
+            with self.assertRaises(SystemExit): main(['--config', '/fake/config', '--max-calls', '201'])
 
     def test_transient_status_probe_does_not_claim_existing_worker(self):
         store = SO101Store(); store.write('worker.lock', {})

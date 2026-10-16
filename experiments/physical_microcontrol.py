@@ -11,7 +11,7 @@ class NoRobot:
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--measured-band',action='store_true');args=parser.parse_args()
     runner=JevRunner(NoRobot(),use_environment_network=True)
-    runner.configure(Path(__file__).resolve().parent.parent/'jev-arm-config.json')
+    runner.configure(Path(__file__).resolve().parents[2]/'jev-arm-config.json')
     controller=MicroController(runner._adapter);sim=Simulation();rows=[]
     initial=sim.state()['ee'];target=[initial[0]+(.02 if args.measured_band else .04),initial[1],initial[2]]
     try:
@@ -30,7 +30,7 @@ def main():
             if row['distance_after']>=row['distance_before']:row['stopped_for_nonprogress']=True;break
         sim.stop()
         result={'calls':controller.calls,'initial':initial,'target':target,'final':sim.state()['ee'],'at_target':abs(target[0]-sim.state()['ee'][0])<=.01,'model_held':bool(rows and rows[-1]['decision']['accepted'] and rows[-1]['decision']['action']=='hold'),'steps':rows,'source':'real Jev selections; physical servo only; no deterministic action fallback'}
-        Path(__file__).resolve().parent.joinpath('artifacts/physical-microcontrol-band.json' if args.measured_band else 'artifacts/physical-microcontrol.json').write_text(json.dumps(result,indent=2))
+        Path(__file__).resolve().parents[1].joinpath('artifacts/physical-microcontrol-band.json' if args.measured_band else 'artifacts/physical-microcontrol.json').write_text(json.dumps(result,indent=2))
         print(json.dumps({k:v for k,v in result.items() if k!='steps'}),flush=True)
     finally:controller.close();sim.close()
 if __name__=='__main__':main()

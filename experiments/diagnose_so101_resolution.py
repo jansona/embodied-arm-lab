@@ -8,7 +8,7 @@ import base64,json,sys,hashlib,collections
 import numpy as np
 import rgb_face_refinement as refinement
 
-ROOT=Path(__file__).resolve().parent
+ROOT=Path(__file__).resolve().parents[1]
 WORK=Path('/tmp/so101-resolution-experiment')
 REPORT=ROOT/'artifacts/so101-resolution-precision-evaluation.json'
 

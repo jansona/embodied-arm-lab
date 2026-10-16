@@ -10,7 +10,7 @@ class NoRobot:
 
 def main():
     runner=JevRunner(NoRobot(),use_environment_network=True)
-    runner.configure(Path(__file__).resolve().parent.parent/'jev-arm-config.json')
+    runner.configure(Path(__file__).resolve().parents[2]/'jev-arm-config.json')
     controller=MicroController(runner._adapter);trials=[]
     try:
         for trial_index,(axis,sign) in enumerate([('x',1),('x',-1),('y',1),('z',1)]):
@@ -34,7 +34,7 @@ def main():
                 if not(result['at_target'] and result['model_held']):break
             finally:sim.close()
         output={'calls':controller.calls,'trials':trials,'source':'real Jev chooses sign and hold; fixed axis phase specified by test; terminal guard never replaces an action'}
-        Path(__file__).resolve().parent.joinpath('artifacts/phased-micro-validation.json').write_text(json.dumps(output,indent=2))
+        Path(__file__).resolve().parents[1].joinpath('artifacts/phased-micro-validation.json').write_text(json.dumps(output,indent=2))
         print(json.dumps({'calls':controller.calls,'passed':sum(t['at_target'] and t['model_held'] for t in trials),'trials':len(trials)}),flush=True)
     finally:controller.close()
 if __name__=='__main__':main()

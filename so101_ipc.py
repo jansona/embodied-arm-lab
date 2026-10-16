@@ -16,8 +16,10 @@ from so101_jev import SO101Decision, validate_observation, validate_decision
 
 SO101_IPC_ROOT = Path(__file__).resolve().parent / '.runtime' / 'so101-jev-ipc'
 MAX_BYTES = 32767
-MAX_CALLS = 12
-MAX_SECONDS = 180
+MAX_CALLS = 200
+DEFAULT_CALLS = 12
+MAX_SECONDS = 420
+DEFAULT_SECONDS = 180
 REQUEST_SECONDS = 30
 POLL_SECONDS = .02
 REQUEST_SCHEMA = 'so101-jev-ipc-request-v1'

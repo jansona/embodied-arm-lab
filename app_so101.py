@@ -25,12 +25,15 @@ class PlanRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
     text:str
 
+class TaskRequest(PlanRequest):
+    execute:bool=True
+
 class WaypointRequest(BaseModel):
     model_config=ConfigDict(extra='forbid')
     object_id:Literal['red','blue']
 
 class SO101Session:
-    def __init__(self,sim,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None):
+    def __init__(self,sim,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None):
         self.sim=sim;self.lock=threading.RLock();self.closed=False
         self.frames=None;self.frames_time=0.;self.generation=0
         if source_factory is None:
@@ -42,6 +45,12 @@ class SO101Session:
         self.worker=None;self.task={'status':'idle','available':False,'reason':'preview_only','plan':None}
         self.error=None;self.controller=controller;self.enable_waypoint=enable_waypoint
         self.executor_factory=executor_factory;self.waypoint_executor=None
+        from embodied_arm.task_service import TaskService
+        if task_executor is not None and task_executor_factory is not None:raise ValueError('Choose one task executor injection')
+        if task_executor_factory is not None:task_executor=task_executor_factory(sim,self.source,controller)
+        self.task_service=TaskService(scene_source=self.source,brain=brain,executor=task_executor)
+    def _pending(self):
+        return bool((self.worker and self.worker.is_alive()) or self.task_service.status()['pending'])
     def _controller_status(self):
         return self.controller.status() if self.controller and hasattr(self.controller,'status') else {'available':False}
     def state(self):
@@ -54,6 +63,8 @@ class SO101Session:
                 except ValueError:perception={**perception,'reason':'stale_or_invalidated'}
             brain_status=self.brain.status() if self.brain else {'configured':False,'model':'qwen3.8-max','calls':0}
             brain_ready=bool(brain_status.get('available',brain_status.get('configured',False)))
+            workflow=self.task_service.status()
+            chat_state={'queued':'thinking','planning':'thinking','completed':'ready','failed':'error','blocked':'error'}.get(workflow['state'],workflow['state'])
             return {'schema':'so101-ui-v1','robot':self.sim.proprioception(),
                 'perception':{**perception,'configured':bool(vision.get('available',vision.get('configured',False))),
                     'status':'ready' if fresh else perception.get('reason','unconfigured'),
@@ -62,16 +73,19 @@ class SO101Session:
                     'worker':vision,'fresh':fresh,'preview_only':bool(perception.get('scene') and not fresh),
                     'age_seconds':max(0,time.monotonic()-perception['scene']['captured_at']) if perception.get('scene') else None},
                 'brain':brain_status,
+                'chat':{'available':brain_ready,'status':chat_state,'messages':workflow['history'],
+                        'error':workflow.get('error'),'provenance':workflow.get('provenance','none'),'motion_enabled':False},
+                'workflow':workflow,
                 'controller':{**self._controller_status(),'model':'decision-model-preview','fallback':False},
                 'task':{**self.task,'available':bool(brain_ready and fresh),'motion_enabled':False,'scene_fresh':fresh},
                 'waypoint':{**(self.waypoint_executor.status() if self.waypoint_executor else {'status':'idle'}),
                     'available':bool(self.enable_waypoint and vision.get('available',False) and self._controller_status().get('available',False)),
                     'motion_enabled':self.enable_waypoint,'max_calls':12,'max_seconds':90,'offset_xyz':[0,0,.035]},
-                'error':self.error,'pending':bool(self.worker and self.worker.is_alive()),
+                'error':self.error,'pending':self._pending(),
                 'evaluation':{'isolated':True,'exposed_to_ai':False,'visible':False}}
     def observe(self):
         with self.lock:
-            if self.worker and self.worker.is_alive():raise ValueError('A request is already pending')
+            if self._pending():raise ValueError('A request is already pending')
             status=self.vision.status() if self.vision and hasattr(self.vision,'status') else {}
             if not status.get('available',status.get('configured',False)):raise ValueError('Vision worker unavailable; no request sent')
             self.generation+=1;epoch=self.generation;self.error=None
@@ -84,10 +98,18 @@ class SO101Session:
         with self.lock:
             if epoch!=self.generation:return
             self.error=reason;self.task['status']='observation_failed' if reason else 'observed'
+    def submit_task(self,text,execute=True):
+        with self.lock:
+            if self._pending():raise ValueError('A request is already pending')
+            if self.brain is None:raise ValueError('Qwen conversation worker unavailable; no request sent')
+            self.task_service.submit(text,execute=execute)
+            return self.state()
+    def chat(self,text):
+        return self.submit_task(text,execute=False)
     def preview(self,text):
         if not isinstance(text,str) or not text.strip() or len(text)>2000:raise ValueError('Request must be 1..2000 characters')
         with self.lock:
-            if self.worker and self.worker.is_alive():raise ValueError('A request is already pending')
+            if self._pending():raise ValueError('A request is already pending')
             if self.brain is None:raise ValueError('Brain unavailable; no request sent')
             brain_status=self.brain.status()
             if not brain_status.get('available',brain_status.get('configured',False)):raise ValueError('Brain worker unavailable; no request sent')
@@ -111,7 +133,7 @@ class SO101Session:
     def waypoint(self,object_id):
         with self.lock:
             if not self.enable_waypoint:raise ValueError('Waypoint experiment disabled pending runtime validation')
-            if self.worker and self.worker.is_alive():raise ValueError('A request is already pending')
+            if self._pending():raise ValueError('A request is already pending')
             vision_status=self.vision.status() if self.vision else {}
             if not vision_status.get('available') or not self._controller_status().get('available'):
                 raise ValueError('Vision and SO101 Jev workers must both be available; no request sent')
@@ -143,25 +165,27 @@ class SO101Session:
                 self.frames_time=now
             return self.frames
     def control(self,request):
+        if request.action=='reset' and not 0<=request.seed<=9999:raise ValueError('Seed must be 0..9999')
         with self.lock:
             self.generation+=1
             self.source.cancel()
             if self.waypoint_executor:self.waypoint_executor.stop()
             if self.brain and hasattr(self.brain,'cancel'):self.brain.cancel()
             self.task.update(status='stopped',plan=None);self.error=None
+            if request.action=='reset':self.task_service.reset()
+            else:self.task_service.stop()
             self.sim.stop()
             if request.action=='reset':
-                if not 0<=request.seed<=9999:raise ValueError('Seed must be 0..9999')
                 self.sim.reset(request.seed);self.sim.stop();self.frames=None
             return self.state()
     def close(self):
         with self.lock:
-            self.closed=True;self.generation+=1;self.source.cancel()
+            self.closed=True;self.generation+=1;self.source.cancel();self.task_service.stop()
             if self.waypoint_executor:self.waypoint_executor.stop()
             if self.brain and hasattr(self.brain,'cancel'):self.brain.cancel()
             self.sim.stop();self.sim.close()
 
-def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None):
+def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None):
     @asynccontextmanager
     async def lifespan(app):
         factory=sim_factory
@@ -179,7 +203,7 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
             if brain_client is None:
                 from brain_ipc import FileBrainBridge
                 brain_client=FileBrainBridge()
-        session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory);session.sim.stop();app.state.session=session
+        session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory,task_executor=task_executor,task_executor_factory=task_executor_factory);session.sim.stop();app.state.session=session
         def physics():
             last=time.monotonic();accumulator=0.
             while not session.closed:
@@ -209,6 +233,14 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
     @app.post('/api/observe')
     def observe():
         try:return app.state.session.observe()
+        except ValueError as exc:raise HTTPException(409,detail=str(exc)) from None
+    @app.post('/api/tasks')
+    def tasks(request:TaskRequest):
+        try:return app.state.session.submit_task(request.text,request.execute)
+        except ValueError as exc:raise HTTPException(409,detail=str(exc)) from None
+    @app.post('/api/chat')
+    def chat(request:PlanRequest):
+        try:return app.state.session.chat(request.text)
         except ValueError as exc:raise HTTPException(409,detail=str(exc)) from None
     @app.post('/api/plan')
     def plan(request:PlanRequest):

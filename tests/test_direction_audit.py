@@ -3,7 +3,7 @@ import json
 import unittest
 import httpx
 from adapters import ACTIONS, ALIYUN_ENDPOINT, ALIYUN_MODEL, JevAdapter
-from direction_audit import batch_request, coordinate_cases, expected_direction, run_audit
+from experiments.direction_audit import batch_request, coordinate_cases, expected_direction, run_audit
 
 
 def payload(wrong=None,confidence=.99):

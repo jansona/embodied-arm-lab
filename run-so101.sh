@@ -1,7 +1,10 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-PYTHON=${PYTHON:-.venv311/bin/python}
-if [ ! -x "$PYTHON" ]; then PYTHON=python3; fi
-# Preview-only by default. This script never starts paid inference or loads keys.
-exec "$PYTHON" -m uvicorn app_so101:app --host 127.0.0.1 --port 8766
+if [ -z "${PYTHON:-}" ]; then
+    if [ -x .venv/bin/python ]; then PYTHON=.venv/bin/python
+    elif [ -x .venv311/bin/python ]; then PYTHON=.venv311/bin/python
+    else PYTHON=python3; fi
+fi
+# Preview by default; live workers require explicit --live --config.
+exec "$PYTHON" start_so101.py "$@"

@@ -246,7 +246,7 @@ def test_packet_and_status_copies_cannot_mutate_fixed_anchors(fake_refiner):
 
 @pytest.mark.parametrize('scope',[('red','blue','goal'),('red',),('red','blue')])
 def test_saved_rgb_can_track_without_qwen_or_world_state(scope):
-    root=Path(__file__).parent/'artifacts'
+    root=Path(__file__).resolve().parents[1]/'artifacts'
     files=[root/'so101-vision-third-diagnostic.json',root/'so101-live-left.jpg',root/'so101-live-right.jpg']
     if not all(path.exists() for path in files):
         pytest.skip('Optional fixed RGB experiment fixture unavailable')

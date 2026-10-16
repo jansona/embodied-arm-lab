@@ -34,6 +34,7 @@ class CameraSceneSource:
         self.sim=simulation;self.vision=vision;self.clock=clock;self.refine_rgb=bool(refine_rgb)
         self.lock=threading.RLock();self.generation=0;self.scene=None;self.epoch=None;self.actions=None
         self.reason='vision_unconfigured';self.pending=False;self.last_vision=None
+        self.last_rgb_frames=None;self.last_pixel_detections=None
         self.tracker=None;self.tracker_calibrations=None;self.semantic_deadline=None;self.required_objects=('red','blue','goal')
     def cancel(self):
         with self.lock:
@@ -99,7 +100,7 @@ class CameraSceneSource:
                     self.tracker_calibrations=packet['calibrations'];self.semantic_deadline=packet['captured_at']+60.
                     detections=list(refined.detections)
                     if self.roi_tracking:
-                        if set(self.required_objects)!={'red','blue'}:raise ValueError('ROI tracking requires red and blue scope')
+                        if not {'red','blue'}.issubset(self.required_objects):raise ValueError('ROI tracking requires both blocks')
                         from rgb_roi_geometry import bounds_from_detections
                         self.tracking_rois=bounds_from_detections(packet['images'],detections,self.required_objects)
             failure='scene_changed_during_vision'
@@ -121,6 +122,7 @@ class CameraSceneSource:
             with self.lock:
                 if generation!=self.generation:raise ValueError('Vision cancelled')
                 self.scene=scene;self.epoch=after['epoch'];self.actions=after['actions'];self.reason='estimated'
+                self.last_rgb_frames=tuple(frames);self.last_pixel_detections=tuple(detections)
             return self.snapshot()
         except Exception:
             with self.lock:
@@ -130,6 +132,13 @@ class CameraSceneSource:
             raise
         finally:
             with self.lock:self.pending=False
+    def observation_evidence(self):
+        """Server-only RGB/encoder evidence, never simulator contacts/object poses."""
+        with self.lock:
+            snapshot=self.snapshot()
+            if self.last_rgb_frames is None or self.last_pixel_detections is None:
+                raise ValueError('Missing RGB evidence')
+            return snapshot,self.last_rgb_frames,self.last_pixel_detections
     def _record_refinement(self,refined,*,tracking):
         if not tracking:self.last_vision['base_detector_provenance']=self.last_vision['provenance']
         base=self.last_vision.get('base_detector_provenance')

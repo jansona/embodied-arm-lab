@@ -7,7 +7,7 @@ class NoRobot:
 
 def main():
     runner=JevRunner(NoRobot(),use_environment_network=True)
-    runner.configure(Path(__file__).resolve().parent.parent/'jev-arm-config.json')
+    runner.configure(Path(__file__).resolve().parents[2]/'jev-arm-config.json')
     state={'objective':{'id':'local_target','target_xyz':[.51,0,.3],'tolerance_m':.01},
            'end_effector':[.45,0,.3],'workspace':[[.25,.7],[-.35,.35],[.022,.6]]}
     result=runner._adapter.decide(state)

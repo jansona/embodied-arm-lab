@@ -28,3 +28,7 @@ artifacts/
 # Never publish local credentials or historical runtime evidence
 .github-cli-private/
 tests/fixtures/so101_recorded_qwen_pixels.json
+
+# Local generated simulation evidence
+/SO101-*.json
+/tests/fixtures/*.json

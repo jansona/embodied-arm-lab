@@ -13,7 +13,7 @@ import stat
 import time
 from ipc import number
 from so101_jev import SO101Decision, validate_observation, validate_decision
-from so101_ipc import (SO101Store, MAX_BYTES, MAX_CALLS, MAX_SECONDS, POLL_SECONDS,
+from so101_ipc import (SO101Store, MAX_BYTES, MAX_CALLS, MAX_SECONDS, DEFAULT_CALLS, DEFAULT_SECONDS, POLL_SECONDS,
     REQUEST_SECONDS, RESULT_SCHEMA, _loads, _json, failure, validate_job)
 
 
@@ -59,11 +59,11 @@ def _reap(process):
     process.close()
 
 
-def worker_run(adapter, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
+def worker_run(adapter, max_calls=DEFAULT_CALLS, max_seconds=DEFAULT_SECONDS):
     if type(max_calls) is not int or not 1 <= max_calls <= MAX_CALLS:
-        raise ValueError('SO101 call budget must be 1 to 12')
+        raise ValueError('SO101 call budget must be 1 to 200')
     if not number(max_seconds) or not 0 < max_seconds <= MAX_SECONDS:
-        raise ValueError('SO101 time budget must be positive and at most 180 seconds')
+        raise ValueError('SO101 time budget must be positive and at most 420 seconds')
     context = multiprocessing.get_context('fork')
     store = SO101Store()
     lock_fd = None
@@ -208,11 +208,11 @@ def worker_run(adapter, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Run one bounded SO101-specific Jev window')
     parser.add_argument('--config', required=True, help='Explicit approved external configuration path')
-    parser.add_argument('--max-calls', type=int, default=MAX_CALLS)
-    parser.add_argument('--max-seconds', type=float, default=MAX_SECONDS)
+    parser.add_argument('--max-calls', type=int, default=DEFAULT_CALLS)
+    parser.add_argument('--max-seconds', type=float, default=DEFAULT_SECONDS)
     args = parser.parse_args(argv)
     if not 1 <= args.max_calls <= MAX_CALLS or not number(args.max_seconds) or not 0 < args.max_seconds <= MAX_SECONDS:
-        parser.error('Limits must be 1 to 12 calls and greater than 0 to 180 seconds')
+        parser.error('Limits must be 1 to 200 calls and greater than 0 to 420 seconds')
     try:
         from so101_jev import SO101JevAdapter
         with SO101JevAdapter.from_config(args.config, max_calls=args.max_calls,

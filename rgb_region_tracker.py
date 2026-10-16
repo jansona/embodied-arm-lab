@@ -88,8 +88,10 @@ class RGBRegionTracker:
     tuple. required_objects is fixed at start; nonrequired points are never cached
     or returned for control, even if the initial full-scene refinement found them.
     """
-    def __init__(self, *, clock: Callable[[], float] | None = None, refinement_profile="baseline"):
+    def __init__(self, *, clock: Callable[[], float] | None = None, refinement_profile="baseline", semantic_lifetime_s=SEMANTIC_LIFETIME_S, max_tracking_frames=MAX_TRACKING_FRAMES):
         if refinement_profile not in ("baseline","scaled"):raise ValueError("Unknown RGB refinement profile")
+        if not 0 < semantic_lifetime_s <= 120 or type(max_tracking_frames) is not int or not 1 <= max_tracking_frames <= 120:raise ValueError('Invalid bounded tracking lease')
+        self.semantic_lifetime_s=float(semantic_lifetime_s);self.max_tracking_frames=max_tracking_frames
         self.refinement_profile=refinement_profile
         self.initial_source=INITIAL_SOURCE if refinement_profile=="baseline" else "hybrid_qwen_region_rgb_geometry_scaled"
         self.tracked_source=self.initial_source+"_tracked"
@@ -99,6 +101,7 @@ class RGBRegionTracker:
         self._lock = threading.RLock()
         self._session: _Session | None = None
         self._last_reason = 'not_started'
+        self.last_drift=[]
 
     def _refine(self,packet,detections):
         if self.refinement_profile=='scaled':
@@ -117,14 +120,14 @@ class RGBRegionTracker:
             session = self._session
             result = {'active': session is not None, 'reason': self._last_reason,
                       'profile': 'static_hover_only', 'source': self.tracked_source,
-                      'semantic_lifetime_s': SEMANTIC_LIFETIME_S,
-                      'max_tracking_frames': MAX_TRACKING_FRAMES,
+                      'semantic_lifetime_s': self.semantic_lifetime_s,
+                      'max_tracking_frames': self.max_tracking_frames,
                       'max_current_frame_age_s': MAX_CURRENT_FRAME_AGE_S,
                       'max_initial_anchor_drift_px': MAX_INITIAL_ANCHOR_DRIFT_PX}
             if session is not None:
                 result.update(epoch=session.epoch, semantic_frame_id=session.semantic_frame_id,
                               semantic_captured_at=session.semantic_captured_at,
-                              semantic_deadline=session.semantic_captured_at+SEMANTIC_LIFETIME_S,
+                              semantic_deadline=session.semantic_captured_at+self.semantic_lifetime_s,
                               last_frame_id=session.last_frame_id,
                               last_captured_at=session.last_captured_at,
                               tracked_frames=session.tracked_frames,
@@ -183,7 +186,7 @@ class RGBRegionTracker:
             age = stamp-snapshot['captured_at']
             if age < 0:
                 return self._fail('future_frame', source=self.initial_source)
-            if age >= SEMANTIC_LIFETIME_S:
+            if age >= self.semantic_lifetime_s:
                 return self._fail('semantic_expired', source=self.initial_source)
             try:
                 result = self._refine(snapshot, canonical_ai_detections)
@@ -195,7 +198,7 @@ class RGBRegionTracker:
                 completed_at = self._time(now)
             except ValueError as exc:
                 return self._fail(str(exc), source=self.initial_source)
-            if completed_at < stamp or completed_at-snapshot['captured_at'] >= SEMANTIC_LIFETIME_S:
+            if completed_at < stamp or completed_at-snapshot['captured_at'] >= self.semantic_lifetime_s:
                 return self._fail('semantic_expired', source=self.initial_source)
             required_detections = tuple(item for item in result.detections if item.object_id in required_objects)
             required_evidence = tuple(item for item in result.evidence if item.object_id in required_objects)
@@ -223,9 +226,9 @@ class RGBRegionTracker:
                 return self._fail('clock_moved_backwards')
             if stamp < session.semantic_captured_at or stamp-snapshot['captured_at'] < 0:
                 return self._fail('future_frame')
-            if stamp-session.semantic_captured_at >= SEMANTIC_LIFETIME_S:
+            if stamp-session.semantic_captured_at >= self.semantic_lifetime_s:
                 return self._fail('semantic_expired')
-            if session.tracked_frames >= MAX_TRACKING_FRAMES:
+            if session.tracked_frames >= self.max_tracking_frames:
                 return self._fail('tracking_frame_budget')
             if stamp-snapshot['captured_at'] > MAX_CURRENT_FRAME_AGE_S:
                 return self._fail('stale_current_frame')
@@ -254,8 +257,11 @@ class RGBRegionTracker:
             if not self._validate_result(result, snapshot, session.required_objects):
                 return self._fail('tracking_refinement_failed', evidence=evidence)
             required_detections = tuple(item for item in result.detections if item.object_id in session.required_objects)
-            if any(math.dist(item.uv, anchors[(item.camera_id, item.object_id)].uv) > MAX_INITIAL_ANCHOR_DRIFT_PX
-                   for item in required_detections):
+            self.last_drift=[{'object_id':item.object_id,'camera_id':item.camera_id,
+                              'initial_uv':anchors[(item.camera_id,item.object_id)].uv,'observed_uv':item.uv,
+                              'distance_px':math.dist(item.uv,anchors[(item.camera_id,item.object_id)].uv)}
+                             for item in required_detections]
+            if any(item['distance_px']>MAX_INITIAL_ANCHOR_DRIFT_PX for item in self.last_drift):
                 return self._fail('initial_anchor_drift', evidence=evidence)
             try:
                 completed_at = self._time(now)
@@ -263,7 +269,7 @@ class RGBRegionTracker:
                 return self._fail(str(exc))
             if completed_at < stamp:
                 return self._fail('clock_moved_backwards')
-            if completed_at-session.semantic_captured_at >= SEMANTIC_LIFETIME_S:
+            if completed_at-session.semantic_captured_at >= self.semantic_lifetime_s:
                 return self._fail('semantic_expired', evidence=evidence)
             if completed_at-snapshot['captured_at'] > MAX_CURRENT_FRAME_AGE_S:
                 return self._fail('stale_current_frame', evidence=evidence)

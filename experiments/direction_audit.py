@@ -114,7 +114,7 @@ def main():
     from runner import JevRunner
     runner=JevRunner(NoRobot(),use_environment_network=args.environment_network)
     try:
-        runner.configure(Path(__file__).resolve().parent.parent/'jev-arm-config.json')
+        runner.configure(Path(__file__).resolve().parents[2]/'jev-arm-config.json')
         if runner._adapter is None:raise ValueError('Not configured')
         print(json.dumps(run_audit(runner._adapter),indent=2))
     except Exception:
