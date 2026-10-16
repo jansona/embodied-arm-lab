@@ -16,6 +16,7 @@ import embodied_arm.runtime.visual_loop_ipc as ipc
 from embodied_arm.runtime.visual_loop_worker import worker_run, main
 from embodied_arm.providers.visual_brain import ACTIONS, SCHEMA, QwenVisualBrain
 from embodied_arm.providers.visual_cerebellum import VisualJev
+from embodied_arm.providers.configuration import BASE_URL, load_configuration as real_config_loader
 
 MP = multiprocessing.get_context('fork')
 
@@ -37,7 +38,7 @@ def packet():
 def observation(frame='frame-1'):
     return {'schema': SCHEMA, 'frame_id': frame, 'visual_summary': 'A patterned cup is visible.',
             'local_objective': 'Move slightly toward the visible cup.', 'decision': 'continue',
-            'evidence': 'The gripper is visibly above the cup.', 'confidence': .95}
+            'evidence': 'The gripper is visibly above the cup.', 'confidence': .95, 'action': ACTIONS[0]}
 
 
 def qwen_payload():
@@ -89,12 +90,14 @@ def runtime(tmp_path, monkeypatch):
     monkeypatch.setattr('embodied_arm.providers.configuration.load_configuration',
                         Mock(side_effect=AssertionError('Actual configuration must never be read')))
     threads = []
-    def start(qwen=None, jev=None, calls=1, seconds=1.2):
-        qwen, jev = qwen or FakeQwen(), jev or FakeJev()
+    def start(qwen=None, jev=None, calls=1, seconds=1.2, mode='qwen_direct'):
+        qwen = qwen or FakeQwen()
+        if mode == 'two_model': jev = jev or FakeJev()
         done = []
         errors = []
         def run():
-            try: done.append(worker_run(qwen, jev, calls, seconds))
+            try: done.append(worker_run(qwen, jev if mode == 'two_model' else None, calls, seconds,
+                                       **({'mode': mode} if mode is not None else {})))
             except BaseException as exc: errors.append(type(exc).__name__)
         thread = threading.Thread(target=run)
         threads.append((thread, errors))
@@ -118,7 +121,7 @@ def read(name):
 
 def test_both_components_pooled_full_image_roundtrip_and_budgets(runtime):
     root, start = runtime
-    qwen, jev, thread, done = start()
+    qwen, jev, thread, done = start(mode='two_model')
     brain, motor = ipc.FileVisualBridge('qwen'), ipc.FileVisualBridge('jev')
     assert brain.status()['max_calls'] == 2
     assert motor.status()['max_calls'] == 1
@@ -163,9 +166,10 @@ def test_bad_provider_output_rejected_and_sanitized(runtime, mode):
     assert 'SECRET' not in json.dumps(result) + json.dumps(read('last-run-audit.json'))
 
 
-def test_cancel_reaps_child_then_new_job_keeps_session_and_budget(runtime):
+@pytest.mark.parametrize('mode', ['qwen_direct', 'two_model'])
+def test_cancel_reaps_child_then_new_job_keeps_session_and_budget(runtime, mode):
     _, start = runtime
-    qwen, _, thread, done = start(FakeQwen('slow_first'))
+    qwen, _, thread, done = start(FakeQwen('slow_first'), mode=mode)
     bridge = ipc.FileVisualBridge()
     original_status = bridge.status()
     result = []
@@ -187,10 +191,11 @@ def test_cancel_reaps_child_then_new_job_keeps_session_and_budget(runtime):
     resumed = bridge.observe(**qwen_payload())
     assert resumed['accepted'] and resumed['calls'] == 2
     assert qwen.pid.value != old_pid
-    assert ipc.FileVisualBridge('jev').decide(observation(), robot())['accepted']
+    if mode == 'two_model':
+        assert ipc.FileVisualBridge('jev').decide(observation(), robot())['accepted']
     thread.join(.7)
     assert done[0]['status'] == 'call_budget'
-    assert done[0]['calls'] == {'qwen': 2, 'jev': 1}
+    assert done[0]['calls'] == {'qwen': 2, 'jev': 1 if mode == 'two_model' else 0}
 
 
 def test_close_cancels_inflight_and_busy_rejects(runtime):
@@ -237,7 +242,7 @@ def test_idle_budget_does_not_renew_or_call(runtime):
     qwen, jev, thread, done = start(seconds=.08)
     thread.join(.5)
     assert done[0]['status'] == 'time_budget'
-    assert qwen.count.value == jev.count.value == 0
+    assert qwen.count.value == 0 and jev is None
     assert not ipc.worker_status()['available']
 
 
@@ -355,17 +360,24 @@ def test_worker_budget_validation(calls, seconds):
     with pytest.raises(ValueError): worker_run(FakeQwen(), FakeJev(), calls, seconds)
 
 
-def test_cli_loaders_only_explicit_mocked_and_close(runtime, capsys):
+@pytest.mark.parametrize('mode', [None, 'qwen_direct', 'two_model'])
+def test_cli_loaders_only_explicit_mocked_and_close(runtime, capsys, mode):
     qwen, jev = Mock(), Mock()
     with patch.object(QwenVisualBrain, 'from_config', return_value=qwen) as qload, \
          patch.object(VisualJev, 'from_config', return_value=jev) as jload, \
          patch('embodied_arm.runtime.visual_loop_worker.worker_run', return_value={'status': 'time_budget'}) as run:
-        main(['--config', '/fake/outside.json', '--max-calls', '3', '--max-seconds', '9'])
+        main(['--config', '/fake/outside.json', '--max-calls', '3', '--max-seconds', '9']
+             + (['--mode', mode] if mode is not None else []))
     assert qload.call_args.kwargs['max_calls'] == 4
-    assert jload.call_args.kwargs['max_calls'] == 3
-    assert run.call_args.args == (qwen, jev, 3, 9.)
+    if mode == 'two_model':
+        assert jload.call_args.kwargs['max_calls'] == 3
+        jev.close.assert_called_once()
+    else:
+        jload.assert_not_called()
+        jev.close.assert_not_called()
+    assert run.call_args.args == (qwen, jev if mode == 'two_model' else None, 3, 9.)
+    assert run.call_args.kwargs == {'mode': mode or 'qwen_direct'}
     qwen.close.assert_called_once()
-    jev.close.assert_called_once()
     assert json.loads(capsys.readouterr().out) == {'status': 'time_budget'}
 
 
@@ -478,3 +490,75 @@ def test_cli_sigterm_reaps_pending_child(runtime, monkeypatch):
         worker.join(1)
         worker.close()
         if caller: caller.join(1)
+
+
+def test_default_direct_no_jev_object_finishes_on_qwen_budget(runtime):
+    _, start = runtime
+    qwen, jev, thread, done = start(mode=None)
+    assert jev is None
+    bridge = ipc.FileVisualBridge()
+    status = bridge.status()
+    assert status['mode'] == 'qwen_direct' and status['enabled'] and status['max_calls'] == 2
+    disabled = ipc.FileVisualBridge('jev')
+    status = disabled.status()
+    assert status['mode'] == 'qwen_direct' and status['status'] == 'disabled'
+    assert not status['enabled'] and not status['configured'] and not status['available']
+    assert status['max_calls'] == status['remaining_calls'] == status['calls'] == 0
+    assert disabled.decide(observation(), robot())['reason'] == 'unavailable'
+    for n in (1, 2):
+        result = bridge.observe(**qwen_payload())
+        assert result['accepted'] and result['calls'] == n
+        assert result['observation']['action'] == ACTIONS[0]
+    thread.join(.7)
+    assert done[0]['status'] == 'call_budget'
+    assert done[0]['mode'] == 'qwen_direct'
+    assert done[0]['calls'] == {'qwen': 2, 'jev': 0}
+    assert done[0]['max_calls'] == {'qwen': 2, 'jev': 0}
+    assert qwen.count.value == 2
+
+
+def test_direct_rejects_manually_queued_jev_job(runtime):
+    _, start = runtime
+    qwen, jev, thread, done = start(mode=None, seconds=.2)
+    assert jev is None
+    data = job_data(ipc.worker_status()['session_id'])
+    data['component'] = 'jev'
+    data['payload'] = ipc.normalize_payload('jev', {'observation': observation(), 'robot': robot()})
+    data['payload_sha256'] = ipc.payload_hash(data['payload'])
+    store = ipc.VisualStore()
+    try: store.write(data['id'] + '.job', data)
+    finally: store.close()
+    thread.join(.7)
+    assert done[0]['rejected'] == 1 and done[0]['calls'] == {'qwen': 0, 'jev': 0}
+    assert qwen.count.value == 0
+
+
+@pytest.mark.parametrize('mode', ['other', None, [], 1])
+def test_invalid_worker_mode_rejected(mode):
+    with pytest.raises(ValueError): worker_run(FakeQwen(), mode=mode)
+
+
+def test_explicit_two_model_requires_jev():
+    with pytest.raises(ValueError, match='requires Jev'):
+        worker_run(FakeQwen(), mode='two_model')
+
+
+def test_direct_cli_loads_fake_brain_only_file_without_jev(runtime, tmp_path, monkeypatch, capsys):
+    # This is a newly created fake file, never an existing saved configuration.
+    config = {'schema_version': 2, 'brain': {'provider': 'aliyun_bailian', 'base_url': BASE_URL,
+              'model': 'qwen3.8-max', 'api_key': 'FAKE-TEST-KEY-ONLY'}}
+    path = tmp_path / 'fake-brain-only.json'
+    path.write_text(json.dumps(config))
+    monkeypatch.setattr('embodied_arm.providers.configuration.load_configuration', real_config_loader)
+    client = Mock()
+    with patch('embodied_arm.providers.visual_brain.httpx.Client', return_value=client), \
+         patch.object(VisualJev, 'from_config', side_effect=AssertionError('No Jev loader in direct mode')) as jload, \
+         patch('embodied_arm.runtime.visual_loop_worker.worker_run', return_value={'status': 'time_budget'}) as run:
+        main(['--config', str(path), '--max-calls', '3', '--max-seconds', '9'])
+    jload.assert_not_called()
+    client.stream.assert_not_called()
+    client.close.assert_called_once()
+    qwen, jev, calls, seconds = run.call_args.args
+    assert isinstance(qwen, QwenVisualBrain) and jev is None and calls == 3 and seconds == 9
+    assert run.call_args.kwargs == {'mode': 'qwen_direct'}
+    assert json.loads(capsys.readouterr().out) == {'status': 'time_budget'}

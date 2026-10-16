@@ -29,3 +29,11 @@ def test_provider_session_budget_is_separate_from_task_attempts():
     assert '剩余 0 次' in values[1] and '剩余 0 秒' in values[1]
     assert '预算未提供' in values[2]
     assert '本任务请求记录' in source
+
+def test_direct_mode_does_not_claim_jev_control_or_budget():
+    source=(ROOT/'ui.js').read_text();code=source[:source.index('async function api')]
+    dom="const elements={};global.document={getElementById:id=>elements[id]||(elements[id]={children:[],replaceChildren(){this.children=[]},appendChild(x){this.children.push(x)}}),createElement:()=>({})};"
+    value=script_run(dom+code+'''\nconst s={workflow:{state:'executing',pending:true,execution_available:true,control_mode:'qwen_direct',decision_calls:2,controller_calls:0},qwen:{available:true,remaining_calls:4},jev:{available:false}};render(s);console.log(JSON.stringify({mode:elements['control-mode'].textContent,budget:elements.budgets.textContent,status:elements['workflow-status'].textContent}));''')
+    assert 'Qwen 选择动作' in value['mode'] and 'Jev 未启用' in value['mode']
+    assert '动作决策请求 2' in value['budget'] and '实际 Jev 请求 0' in value['budget']
+    assert 'Jev 会话' not in value['budget'] and 'Jev 正在' not in value['status']

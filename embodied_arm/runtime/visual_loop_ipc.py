@@ -21,10 +21,10 @@ from embodied_arm.runtime.ipc import Store
 from embodied_arm.providers.visual_brain import (frame_snapshot, sanitize_robot,
     normalize_history, text_value, number, validate_visual_observation,
     validate_visual_result, visual_failure)
-from embodied_arm.providers.visual_cerebellum import validate_jev_result, failure as jev_failure
 
 VISUAL_IPC_ROOT = RUNTIME_ROOT / 'visual-loop-ipc'
 COMPONENTS = ('qwen', 'jev')
+MODES = ('qwen_direct', 'two_model')
 MAX_CALLS = 200
 MAX_QWEN_CALLS = 201
 MAX_SECONDS = 600
@@ -153,12 +153,15 @@ def fresh(component, payload):
 
 
 def failure(component, reason, calls=0):
-    return visual_failure(reason, calls) if component == 'qwen' else jev_failure(reason)
+    if component == 'qwen': return visual_failure(reason, calls)
+    from embodied_arm.providers.visual_cerebellum import failure as jev_failure
+    return jev_failure(reason)
 
 
 def validate_result(component, result, payload):
     if component == 'qwen':
         return validate_visual_result(result, payload['packet']['frame_id'])
+    from embodied_arm.providers.visual_cerebellum import validate_jev_result
     return validate_jev_result(result)
 
 
@@ -182,7 +185,7 @@ def worker_status(component='qwen'):
     _component(component)
     safe = {'configured': False, 'available': False, 'status': 'offline', 'busy': False,
             'component': component, 'calls': 0, 'max_calls': 0, 'remaining_calls': 0,
-            'remaining_seconds': 0., 'session_id': None, 'fallback': False}
+            'remaining_seconds': 0., 'session_id': None, 'fallback': False, 'mode': None, 'enabled': False}
     store = None
     fd = None
     try:
@@ -198,19 +201,27 @@ def worker_status(component='qwen'):
         data = store.read('ready.json')
         if not isinstance(data, dict) or data.get('status') not in ('ready', 'calling'): return safe
         session = data.get('session_id')
+        mode = data.get('mode')
         calls, limit, deadline = data.get('calls'), data.get('max_calls'), data.get('deadline_unix')
         if (not isinstance(session, str) or not _ID.fullmatch(session)
+                or not isinstance(mode, str) or mode not in MODES
                 or not isinstance(limit, dict) or set(limit) != set(COMPONENTS)
-                or type(limit['jev']) is not int or not 1 <= limit['jev'] <= MAX_CALLS
-                or type(limit['qwen']) is not int or limit['qwen'] != limit['jev'] + 1
+                or type(limit['qwen']) is not int or not 2 <= limit['qwen'] <= MAX_QWEN_CALLS
+                or type(limit['jev']) is not int
+                or limit['jev'] != (limit['qwen'] - 1 if mode == 'two_model' else 0)
                 or not isinstance(calls, dict) or set(calls) != set(COMPONENTS)
                 or any(type(v) is not int or not 0 <= v <= limit[k] for k, v in calls.items())
                 or not number(deadline) or data.get('active_component') not in (None, *COMPONENTS)):
             return safe
         remaining = deadline - time.time()
         if not 0 < remaining <= MAX_SECONDS + .5: return safe
+        enabled = component == 'qwen' or mode == 'two_model'
+        if not enabled:
+            if data['active_component'] == component: return safe
+            return {**safe, 'status': 'disabled', 'mode': mode, 'session_id': session,
+                    'remaining_seconds': round(remaining, 3)}
         available = calls[component] < limit[component] or data['active_component'] == component
-        return {**safe, 'configured': True, 'available': available,
+        return {**safe, 'configured': True, 'available': available, 'mode': mode, 'enabled': True,
                 'status': data['status'] if available else 'call_budget', 'busy': data['status'] == 'calling',
                 'calls': calls[component], 'max_calls': limit[component], 'remaining_calls': limit[component] - calls[component],
                 'remaining_seconds': round(remaining, 3), 'session_id': session}

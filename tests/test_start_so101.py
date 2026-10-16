@@ -14,6 +14,7 @@ def test_live_is_explicit_and_bounded(tmp_path):
     assert len(jobs) == 2
     assert jobs[1:] == commands(live=True, config=config, workers_only=True)
     assert jobs[1][1:3] == ['-m', 'embodied_arm.runtime.visual_loop_worker']
+    assert jobs[1][jobs[1].index('--mode')+1] == 'qwen_direct'
     assert jobs[1][-4:] == ['--max-calls', '200', '--max-seconds', '600']
     assert not (tmp_path / 'provider.json').exists()  # Builder never opens credentials.
 
@@ -21,7 +22,7 @@ def test_live_is_explicit_and_bounded(tmp_path):
 @pytest.mark.parametrize('kwargs', [
     {'live': True}, {'workers_only': True}, {'config': '/tmp/example.json'},
     {'live': True, 'config': str(ROOT / 'config.local.json')},
-    {'port': 0}, {'port': 65536}, {'port': True},
+    {'mode': 'invalid'}, {'port': 0}, {'port': 65536}, {'port': True},
 ])
 def test_invalid_launch_is_rejected_before_process_start(kwargs):
     with pytest.raises(ValueError):
@@ -116,7 +117,7 @@ def test_simulation_task_switch_and_notice_are_explicit(monkeypatch,tmp_path,cap
     assert all(kwargs['env']['SO101_CYCLE_MAX_CALLS']=='32' for _,kwargs in launched)
     output=capsys.readouterr().out
     if live:
-        assert 'Qwen at most 201 calls' in output and '200 Jev calls/420s per task' in output
+        assert 'Qwen at most 201 calls' in output and '200 action decisions/420s per task' in output
         assert 'Completion is Qwen assessment' in output
         assert 'including idle time' in output and 'No automatic calls' in output
         assert 'runtime guards may stop' in output and 'No physical hardware control' in output
@@ -157,3 +158,33 @@ def test_progress_review_interval_propagates_without_extra_worker(monkeypatch, t
     assert all(kwargs['env']['SO101_CYCLE_MAX_CALLS'] == str(value) for _, kwargs in launched)
     assert launched[-1][0][-4:] == ['--max-calls', '200', '--max-seconds', '600']
     assert f'every {value} actions, without an extra model call' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('mode', ['qwen_direct', 'two_model'])
+@pytest.mark.parametrize('live', [False, True])
+def test_control_mode_propagates_to_app_and_worker(monkeypatch, tmp_path, capsys, mode, live):
+    import embodied_arm.runtime.start_so101 as launcher
+    launched=[]
+    class Child:
+        def __init__(self, command, **kwargs): launched.append((command, kwargs))
+        def poll(self): return 0
+        def wait(self, timeout=None): return 0
+    monkeypatch.setattr(launcher.subprocess, 'Popen', Child)
+    monkeypatch.setattr(launcher.signal, 'signal', lambda *_: None)
+    monkeypatch.setenv('SO101_CONTROL_MODE', 'two_model' if mode == 'qwen_direct' else 'qwen_direct')
+    args=['--mode', mode]
+    if live: args += ['--live', '--config', str(tmp_path/'external.json')]
+    assert launcher.main(args) == 0
+    assert all(kwargs['env']['SO101_CONTROL_MODE'] == mode for _,kwargs in launched)
+    if live:
+        command=launched[-1][0]
+        assert command[command.index('--mode')+1] == mode
+        assert f'Jev at most {200 if mode == "two_model" else 0} calls' in capsys.readouterr().out
+    else:
+        assert len(launched) == 1
+
+
+def test_invalid_mode_rejected_before_launch(monkeypatch):
+    import embodied_arm.runtime.start_so101 as launcher
+    monkeypatch.setattr(launcher.subprocess, 'Popen', lambda *a, **k: pytest.fail('Must not launch'))
+    with pytest.raises(SystemExit): launcher.main(['--mode', 'invalid'])

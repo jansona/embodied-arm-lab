@@ -69,7 +69,9 @@ def parse_configuration(config,*,component=None):
     if component is not None and component not in MODELS:raise ValueError('unsupported_component')
     if not isinstance(config,dict):raise ValueError('invalid_provider_configuration')
     if 'schema_version' in config:
-        if type(config['schema_version']) is not int or config['schema_version']!=2 or set(config)!={'schema_version','brain','cerebellum'}:
+        required={'schema_version',component} if component else {'schema_version','brain','cerebellum'}
+        if (type(config['schema_version']) is not int or config['schema_version']!=2
+                or not required.issubset(config) or set(config)-{'schema_version','brain','cerebellum'}):
             raise ValueError('invalid_configuration_version')
         return {name:_settings(config[name],name) for name in ([component] if component else MODELS)}
     allowed={'provider','endpoint','model','api_key','min_confidence','timeout'}

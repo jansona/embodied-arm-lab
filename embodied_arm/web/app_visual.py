@@ -26,7 +26,8 @@ class UnconfiguredProvider:
     def status(self):return {'available':False,'configured':False,'calls':0,'component':self.component,'provenance':'unconfigured'}
     def cancel(self):pass
 
-def create_app(sim_factory=None,qwen=None,jev=None,service_factory=None,*,live=False,camera_interval_seconds=1.,cycle_max_calls=32):
+def create_app(sim_factory=None,qwen=None,jev=None,service_factory=None,*,live=False,camera_interval_seconds=1.,cycle_max_calls=32,mode="qwen_direct"):
+    if mode not in ("qwen_direct","two_model"):raise ValueError("invalid_control_mode")
     @asynccontextmanager
     async def lifespan(app):
         factory=sim_factory
@@ -34,18 +35,18 @@ def create_app(sim_factory=None,qwen=None,jev=None,service_factory=None,*,live=F
             from embodied_arm.simulation.so101_simulation import SO101Simulation
             factory=lambda:SO101Simulation(camera_profile='observer_wrist')
         sim=factory();sim.stop()
-        qwen_client=qwen;jev_client=jev
+        qwen_client=qwen;jev_client=jev if mode=="two_model" else None
         if live:
             from embodied_arm.runtime.visual_loop_ipc import FileVisualBridge
             if qwen_client is None:qwen_client=FileVisualBridge(component='qwen')
-            if jev_client is None:jev_client=FileVisualBridge(component='jev')
+            if mode=='two_model' and jev_client is None:jev_client=FileVisualBridge(component='jev')
         qwen_client=qwen_client or UnconfiguredProvider('qwen')
-        jev_client=jev_client or UnconfiguredProvider('jev')
+        if mode=='two_model':jev_client=jev_client or UnconfiguredProvider('jev')
         selected_service=service_factory
         if selected_service is None:
             from embodied_arm.services.visual_action_loop import VisualActionLoop
             selected_service=VisualActionLoop
-        service=selected_service(sim,qwen_client,jev_client,cycle_max_calls=cycle_max_calls,max_calls=200,max_seconds=420)
+        service=selected_service(sim,qwen_client,jev_client,cycle_max_calls=cycle_max_calls,max_calls=200,max_seconds=420,mode=mode)
         camera=CameraSampler(sim,interval_seconds=camera_interval_seconds)
         app.state.sim=sim;app.state.service=service;app.state.camera=camera
         app.state.qwen=qwen_client;app.state.jev=jev_client
@@ -76,7 +77,7 @@ def create_app(sim_factory=None,qwen=None,jev=None,service_factory=None,*,live=F
     def state():
         return {'schema':'visual-action-ui-v1','robot':sanitize_robot(app.state.sim.proprioception()),
                 'camera':app.state.camera.status(),'workflow':app.state.service.status(),
-                'qwen':app.state.qwen.status(),'jev':app.state.jev.status()}
+                'qwen':app.state.qwen.status(),'jev':app.state.jev.status() if app.state.jev is not None else {'available':False,'enabled':False,'calls':0}}
     @app.get('/')
     def index():return FileResponse(ROOT/'static_visual'/'index.html')
     app.get('/api/state')(state)
@@ -101,4 +102,4 @@ def create_app(sim_factory=None,qwen=None,jev=None,service_factory=None,*,live=F
         return state()
     return app
 
-app=create_app(live=os.environ.get('SO101_VISUAL_LIVE')=='1',camera_interval_seconds=float(os.environ.get('SO101_CAMERA_INTERVAL','1')),cycle_max_calls=int(os.environ.get('SO101_CYCLE_MAX_CALLS','32')))
+app=create_app(live=os.environ.get('SO101_VISUAL_LIVE')=='1',camera_interval_seconds=float(os.environ.get('SO101_CAMERA_INTERVAL','1')),cycle_max_calls=int(os.environ.get('SO101_CYCLE_MAX_CALLS','32')),mode=os.environ.get('SO101_CONTROL_MODE','qwen_direct'))

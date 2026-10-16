@@ -27,7 +27,8 @@ def packet():
 def observation(**changes):
     return {'schema':qb.SCHEMA,'frame_id':'frame-1','visual_summary':'A mug and folded cloth are visible beside the open gripper.',
         'local_objective':'Approach the mug handle while preserving clearance.', 'decision':'continue',
-        'evidence':'The current views show the handle and a gap to the gripper.', 'confidence':.9, **changes}
+        'evidence':'The current views show the handle and a gap to the gripper.', 'confidence':.9,
+        'action':'x_plus_0.5mm' if changes.get('decision','continue')=='continue' else None, **changes}
 
 
 def completion(obs=None):
@@ -259,3 +260,46 @@ def test_gripper_prompt_requires_exact_increment_in_bounds_not_clamping():
         criterion=body['questions']['action']['criteria'][action]
         assert 'exactly 0.1' in criterion and 'otherwise hold' in criterion
         assert 'capped' not in criterion and 'floored' not in criterion
+
+
+@pytest.mark.parametrize('action',qb.ACTIONS)
+def test_v2_qwen_direct_accepts_every_finite_action(action):
+    obs=observation(action=action)
+    assert qb.validate_visual_observation(obs,'frame-1')['action']==action
+    model=qb.QwenVisualBrain(api_key='mock-key',transport=httpx.MockTransport(lambda _:httpx.Response(200,json=completion(obs))))
+    result=model.observe('Move as observed',packet(),robot())
+    assert result['accepted'] and result['observation']['action']==action
+    assert result['observation']['schema']=='qwen-visual-state-v2'
+    model.close()
+
+
+@pytest.mark.parametrize('action',[None,'x_plus','x_plus_3mm','open',{'x':.001},.001,True])
+def test_v2_continue_rejects_missing_arbitrary_or_old_action(action):
+    with pytest.raises(ValueError):qb.validate_visual_observation(observation(action=action))
+
+
+@pytest.mark.parametrize('decision',['clarify','stop','completed'])
+def test_v2_nonmotion_requires_null_action(decision):
+    assert qb.validate_visual_observation(observation(decision=decision))['action'] is None
+    for action in ('hold','x_plus_0.5mm'):
+        with pytest.raises(ValueError):qb.validate_visual_observation(observation(decision=decision,action=action))
+
+
+def test_v1_observations_and_history_are_never_silently_upgraded():
+    old=observation(schema='qwen-visual-state-v1');old.pop('action')
+    with pytest.raises(ValueError):qb.validate_visual_observation(old)
+    with pytest.raises(ValueError):qb.normalize_history({'previous_observation':old,'applied_actions':[]})
+    missing=observation();missing.pop('action')
+    with pytest.raises(ValueError):qb.validate_visual_observation(missing)
+
+
+def test_direct_prompt_and_independent_jev_comparison_contract():
+    body=qb.request_preview('test',packet(),robot())['body']
+    prompt=body['messages'][0]['content']
+    assert 'qwen-visual-state-v2' in prompt and 'your action is the sole model-selected command' in prompt
+    assert 'action must be null' in prompt and 'x_plus_0.5mm' in prompt
+    jev=jc.VisualJev(api_key='mock-key',transport=httpx.MockTransport(lambda _:httpx.Response(200,json=choice('z_minus_8mm'))))
+    obs=observation(action='x_plus_0.5mm')
+    assert jev.decide(obs,robot())['action']=='z_minus_8mm'
+    assert 'Ignore visual_state.action' in jc.request_preview(obs,robot())['body']['questions']['action']['instructions']
+    jev.close()

@@ -1,6 +1,7 @@
 """One explicit visual-loop session. No daemon renewal, retries or fallback.
 
-A pooled inference child serves both fixed providers. Stop terminates/reaps that
+A pooled inference child serves Qwen alone by default, or both fixed providers
+only in explicit two_model mode. Stop terminates/reaps that
 child; only a later explicit job may create another, within the SAME deadline
 and cumulative budgets. Expiry or child failure closes the session window.
 """
@@ -16,7 +17,7 @@ import uuid
 from contextlib import ExitStack
 
 from embodied_arm.providers.request_telemetry import worker_telemetry, request_audit_fields
-from embodied_arm.runtime.visual_loop_ipc import (VisualStore, COMPONENTS, MAX_CALLS, MAX_SECONDS,
+from embodied_arm.runtime.visual_loop_ipc import (VisualStore, COMPONENTS, MODES, MAX_CALLS, MAX_SECONDS,
     MAX_BYTES, MAX_RESULT_BYTES, REQUEST_SECONDS, POLL_SECONDS, RESULT_SCHEMA, _json, _loads,
     number, failure, fresh, normalize_payload, validate_job, validate_result)
 
@@ -72,12 +73,20 @@ def _reap(process):
     process.close()
 
 
-def worker_run(qwen, jev, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
-    """max_calls is Jev's cap; Qwen gets one additional final observation."""
+def worker_run(qwen, jev=None, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS, *, mode='qwen_direct'):
+    """max_calls bounds actions; Qwen gets one final observation beyond that.
+
+    Direct mode never retains or invokes a supplied Jev adapter. Runtime action
+    execution keeps its own action cap; this worker only budgets provider calls.
+    """
+    if not isinstance(mode, str) or mode not in MODES: raise ValueError('Invalid visual control mode')
+    if mode == 'two_model' and jev is None: raise ValueError('Two-model mode requires Jev')
     if type(max_calls) is not int or not 1 <= max_calls <= MAX_CALLS:
-        raise ValueError('Jev call budget must be 1 to 200')
+        raise ValueError('Action budget must be 1 to 200')
     if not number(max_seconds) or not 0 < max_seconds <= MAX_SECONDS:
         raise ValueError('Session time budget must be positive and at most 600 seconds')
+    adapters = {'qwen': qwen}
+    if mode == 'two_model': adapters['jev'] = jev
     context = multiprocessing.get_context('fork')
     store = VisualStore()
     lock_fd = None
@@ -85,8 +94,8 @@ def worker_run(qwen, jev, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
     process = connection = None
     started = time.monotonic()
     deadline = started + max_seconds
-    counters = {'status': 'ready', 'session_id': uuid.uuid4().hex, 'active_component': None,
-                'calls': {c: 0 for c in COMPONENTS}, 'max_calls': {'qwen': max_calls + 1, 'jev': max_calls},
+    counters = {'status': 'ready', 'mode': mode, 'session_id': uuid.uuid4().hex, 'active_component': None,
+                'calls': {c: 0 for c in COMPONENTS}, 'max_calls': {'qwen': max_calls + 1, 'jev': max_calls if mode == 'two_model' else 0},
                 'processed': 0, 'rejected': 0, 'cancelled': 0, 'max_seconds': max_seconds,
                 'elapsed_seconds': 0., 'deadline_unix': time.time() + max_seconds}
     audit = []
@@ -148,7 +157,7 @@ def worker_run(qwen, jev, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                 if process is None:
                     connection, child_connection = context.Pipe(duplex=True)
                     process = context.Process(target=_inference_loop,
-                        args=({'qwen': qwen, 'jev': jev}, child_connection,
+                        args=(adapters, child_connection,
                               (store.fd, lock_fd, connection.fileno())),
                         daemon=False, name='bounded-visual-models')
                     process.start()
@@ -229,28 +238,31 @@ def worker_run(qwen, jev, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description='Run one bounded full-image Qwen / Jev simulation window')
+    parser = argparse.ArgumentParser(description='Run one bounded Qwen-direct or explicit two-model simulation window')
     parser.add_argument('--config', required=True, help='Explicit approved external split configuration path')
-    parser.add_argument('--max-calls', type=int, default=MAX_CALLS, help='Jev cap; Qwen gets one additional final observation')
+    parser.add_argument('--mode', choices=MODES, default='qwen_direct')
+    parser.add_argument('--max-calls', type=int, default=MAX_CALLS, help='Action cap; Qwen gets one additional final observation')
     parser.add_argument('--max-seconds', type=float, default=MAX_SECONDS)
     args = parser.parse_args(argv)
     if (not 1 <= args.max_calls <= MAX_CALLS or not number(args.max_seconds)
             or not 0 < args.max_seconds <= MAX_SECONDS):
-        parser.error('Limits must be 1 to 200 Jev calls and greater than 0 to 600 seconds')
+        parser.error('Limits must be 1 to 200 actions and greater than 0 to 600 seconds')
     def stopped(*_):
         raise KeyboardInterrupt
     old_handlers = {sig: signal.signal(sig, stopped) for sig in (signal.SIGTERM, signal.SIGINT)}
     try:
         from embodied_arm.providers.visual_brain import QwenVisualBrain
-        from embodied_arm.providers.visual_cerebellum import VisualJev
         with ExitStack() as stack:
             qwen = QwenVisualBrain.from_config(args.config, max_calls=args.max_calls + 1,
                     timeout=min(30, args.max_seconds), use_environment_network=True)
             stack.callback(qwen.close)
-            jev = VisualJev.from_config(args.config, max_calls=args.max_calls,
-                    timeout=min(15, args.max_seconds), use_environment_network=True)
-            stack.callback(jev.close)
-            print(json.dumps(worker_run(qwen, jev, args.max_calls, args.max_seconds)))
+            jev = None
+            if args.mode == 'two_model':
+                from embodied_arm.providers.visual_cerebellum import VisualJev
+                jev = VisualJev.from_config(args.config, max_calls=args.max_calls,
+                        timeout=min(15, args.max_seconds), use_environment_network=True)
+                stack.callback(jev.close)
+            print(json.dumps(worker_run(qwen, jev, args.max_calls, args.max_seconds, mode=args.mode)))
     except KeyboardInterrupt:
         print(json.dumps({'status': 'stopped'}))
     except Exception:

@@ -16,19 +16,20 @@ class Sim(FakeSim):
         value=packet();value['frame_id']=f'mock-{len(self.frames)}';self.frames.append(value)
         return deepcopy(value)
     def manual(self,action,values=None,*,origin):
-        assert origin=='jev'
+        assert origin in ('jev','qwen')
         super().manual(action,values,origin='offline_fixture')
 
 
 class Brain:
-    def __init__(self,complete_after=1):self.requests=[];self.complete_after=complete_after;self.hook=None
+    def __init__(self,complete_after=1):self.requests=[];self.complete_after=complete_after;self.hook=None;self.action='x_minus_0.5mm'
     def status(self):return {'available':True}
     def observe(self,task,packet,robot,history=None,review=False):
         frame=packet
         self.requests.append(deepcopy((frame,robot,history,review)))
         if self.hook:self.hook()
         return dict(accepted=True,reason='accepted',calls=len(self.requests),observation=observation(
-            frame_id=frame['frame_id'],decision='completed' if len(self.requests)>self.complete_after else 'continue'))
+            frame_id=frame['frame_id'],decision='completed' if len(self.requests)>self.complete_after else 'continue',
+            action=None if len(self.requests)>self.complete_after else self.action))
 
 
 class Jev:
@@ -52,7 +53,7 @@ def settle(loop,timeout=5):
 
 def make(**options):
     sim=Sim();brain=Brain();jev=Jev()
-    return sim,brain,jev,VisualActionLoop(sim,brain,jev,sleep=sim.external_tick,**options)
+    return sim,brain,jev,VisualActionLoop(sim,brain,jev,sleep=sim.external_tick,mode=options.pop('mode','two_model'),**options)
 
 
 def test_fresh_images_and_full_33_choice_action_then_model_assessment():
@@ -111,7 +112,7 @@ def test_real_physics_one_bounded_move_with_mock_visual_completion(monkeypatch):
     def tick():
         while not stop.is_set():sim.tick(4);time.sleep(.004)
     ticker=threading.Thread(target=tick,daemon=True);ticker.start()
-    loop=VisualActionLoop(sim,brain,jev,max_calls=2,max_seconds=30)
+    loop=VisualActionLoop(sim,brain,jev,mode='two_model',max_calls=2,max_seconds=30)
     try:
         initial=sim.proprioception()['ee'];loop.submit('MOCK move once then assess')
         state=settle(loop,30)
@@ -165,14 +166,18 @@ def test_gripper_outside_hardware_bounds_never_applies(action,opening):
     assert state['outcome']['reason']=='mechanical_limit' and not sim.commands
 
 
-def test_real_file_bridge_worker_and_half_mm_physics_with_mock_assessment(tmp_path,monkeypatch):
+@pytest.mark.parametrize('mode',['two_model','qwen_direct'])
+def test_real_file_bridge_worker_and_half_mm_physics_with_mock_assessment(tmp_path,monkeypatch,mode):
     import embodied_arm.runtime.visual_loop_ipc as ipc
     from embodied_arm.runtime.visual_loop_worker import worker_run
     from embodied_arm.simulation.so101_simulation import SO101Simulation
     monkeypatch.setattr(ipc,'VISUAL_IPC_ROOT',tmp_path/'visual-ipc')
     brain,jev=Brain(),Jev('x_minus_0.5mm');errors=[]
+    if mode=='qwen_direct':
+        def forbidden(*args,**kwargs):raise AssertionError('Jev must never be invoked in direct mode')
+        jev.decide=forbidden
     def worker_run_safe():
-        try:worker_run(brain,jev,max_calls=4,max_seconds=12)
+        try:worker_run(brain,jev,max_calls=4,max_seconds=12,mode=mode)
         except BaseException as exc:errors.append(repr(exc))
     worker=threading.Thread(target=worker_run_safe);worker.start()
     until=time.monotonic()+2
@@ -184,12 +189,13 @@ def test_real_file_bridge_worker_and_half_mm_physics_with_mock_assessment(tmp_pa
     def tick():
         while not stop.is_set():sim.tick(4);time.sleep(.004)
     ticker=threading.Thread(target=tick,daemon=True);ticker.start()
-    loop=VisualActionLoop(sim,ipc.FileVisualBridge('qwen'),ipc.FileVisualBridge('jev'),max_calls=2,max_seconds=15)
+    loop=VisualActionLoop(sim,ipc.FileVisualBridge('qwen'),ipc.FileVisualBridge('jev'),mode=mode,max_calls=2,max_seconds=15)
     try:
         initial=sim.proprioception()['ee'];loop.submit('MOCK half millimetre jog')
         state=settle(loop,17);final=sim.proprioception()['ee']
         assert state['state']=='completed',state
         assert state['controller_actions']==1 and state['qwen_calls']==2
+        assert state['decision_calls']==1 and state['controller_calls']==(0 if mode=='qwen_direct' else 1)
         assert state['outcome']['completion_basis']=='qwen_visual_assessment'
         displacement=initial[0]-final[0]
         print('MOCK_VISUAL_IPC_PHYSICS',{'command_m':.0005,'measured_fk_x_m':displacement,'state':state['state']},flush=True)
@@ -197,3 +203,44 @@ def test_real_file_bridge_worker_and_half_mm_physics_with_mock_assessment(tmp_pa
     finally:
         loop.stop();stop.set();ticker.join(2);sim.close();worker.join(14)
     assert not worker.is_alive() and not errors
+
+
+class ForbiddenJev:
+    def status(self):raise AssertionError('Direct readiness must not inspect Jev')
+    def decide(self,*args,**kwargs):raise AssertionError('Direct mode must not invoke Jev')
+
+
+def test_default_direct_mode_needs_only_qwen_and_records_no_jev_calls():
+    sim=Sim();brain=Brain();loop=VisualActionLoop(sim,brain,sleep=sim.external_tick)
+    assert loop.status()['execution_available'] and loop.status()['control_mode']=='qwen_direct'
+    loop.jev=ForbiddenJev();loop.submit('MOCK direct command');state=settle(loop)
+    assert state['state']=='completed' and state['controller_calls']==0
+    assert state['decision_calls']==1 and state['controller_actions']==1
+    assert sim.commands[0][1][0]==pytest.approx(.1995)
+
+
+def test_direct_budget_hold_does_not_complete_and_never_calls_jev():
+    sim=Sim();brain=Brain(100);brain.action='hold'
+    loop=VisualActionLoop(sim,brain,ForbiddenJev(),max_calls=2,sleep=sim.external_tick)
+    loop.submit('MOCK hold');state=settle(loop)
+    assert state['outcome']['reason']=='call_budget' and state['decision_calls']==2
+    assert state['controller_calls']==0 and state['controller_actions']==0
+
+
+@pytest.mark.parametrize('action',['x_plus_100mm','invented',None])
+def test_direct_invalid_model_action_cannot_move(action):
+    sim=Sim();brain=Brain();brain.action=action
+    loop=VisualActionLoop(sim,brain,sleep=sim.external_tick)
+    loop.submit('MOCK invalid');state=settle(loop)
+    assert state['state']=='failed' and not sim.commands and state['controller_calls']==0
+
+
+def test_direct_stop_during_qwen_suppresses_late_action():
+    sim=Sim();brain=Brain();entered=threading.Event();release=threading.Event()
+    def blocked():entered.set();assert release.wait(3)
+    brain.hook=blocked;loop=VisualActionLoop(sim,brain,sleep=sim.external_tick)
+    try:
+        loop.submit('MOCK stop');assert entered.wait(2);loop.stop()
+        with pytest.raises(ValueError,match='task_busy'):loop.submit('MOCK too early')
+    finally:release.set()
+    assert settle(loop)['state']=='cancelled' and not sim.commands

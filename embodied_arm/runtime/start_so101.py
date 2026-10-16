@@ -14,7 +14,7 @@ from embodied_arm.paths import WORKSPACE_ROOT, CONFIG_EXCLUSION_ROOT
 ROOT = WORKSPACE_ROOT
 
 
-def commands(*, live=False, config=None, workers_only=False, port=8766):
+def commands(*, live=False, config=None, workers_only=False, port=8766, mode="qwen_direct"):
     """Build commands without loading credentials or calling a model."""
     if type(port) is not int or not 1 <= port <= 65535:
         raise ValueError('Port must be 1..65535')
@@ -24,6 +24,8 @@ def commands(*, live=False, config=None, workers_only=False, port=8766):
         raise ValueError('--live requires an explicit --config outside the project')
     if config and not live:
         raise ValueError('--config requires --live')
+    if mode not in ("qwen_direct", "two_model"):
+        raise ValueError("Mode must be qwen_direct or two_model")
     jobs = []
     if not workers_only:
         jobs.append(['-m', 'uvicorn', 'embodied_arm.web.app_visual:app', '--host', '127.0.0.1', '--port', str(port)])
@@ -32,7 +34,7 @@ def commands(*, live=False, config=None, workers_only=False, port=8766):
         if path == CONFIG_EXCLUSION_ROOT or CONFIG_EXCLUSION_ROOT in path.parents:
             raise ValueError('Configuration must remain outside the project')
         jobs.append(['-m', 'embodied_arm.runtime.visual_loop_worker', '--config', str(path),
-                     '--max-calls', '200', '--max-seconds', '600'])
+                     '--mode', mode, '--max-calls', '200', '--max-seconds', '600'])
     return [[sys.executable, *job] for job in jobs]
 
 
@@ -41,6 +43,7 @@ def main(argv=None):
     parser.add_argument('--live', action='store_true', help='Enable experimental simulator tasks and bounded workers; explicit UI requests may incur provider charges')
     parser.add_argument('--config', help='Existing provider configuration outside this repository')
     parser.add_argument('--workers-only', action='store_true', help='Only workers, when UI already runs in a supported execution context')
+    parser.add_argument('--mode', choices=('qwen_direct', 'two_model'), default='qwen_direct', help='Qwen directly selects actions by default; two_model enables Jev comparison')
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--camera-interval', type=float, default=1., help='Local RGB capture interval, 0.25..10 seconds; never periodic model calls')
     parser.add_argument('--cycle-max-calls', type=int, default=32, help='Progress review interval, 1..200 actions; no extra model call at review')
@@ -50,7 +53,7 @@ def main(argv=None):
     if not math.isfinite(args.camera_interval) or not .25<=args.camera_interval<=10:
         parser.error('--camera-interval must be 0.25..10 seconds')
     try:
-        jobs = commands(live=args.live, config=args.config, workers_only=args.workers_only, port=args.port)
+        jobs = commands(live=args.live, config=args.config, workers_only=args.workers_only, port=args.port, mode=args.mode)
     except ValueError as exc:
         parser.error(str(exc))
     children = []
@@ -60,7 +63,7 @@ def main(argv=None):
         stop = True
     signal.signal(signal.SIGINT, interrupt)
     signal.signal(signal.SIGTERM, interrupt)
-    env = {**os.environ, 'SO101_CAMERA_INTERVAL':str(args.camera_interval),
+    env = {**os.environ, 'SO101_CONTROL_MODE': args.mode, 'SO101_CAMERA_INTERVAL':str(args.camera_interval),
            'SO101_VISUAL_LIVE':'1' if args.live else '0', 'SO101_CYCLE_MAX_CALLS': str(args.cycle_max_calls)}
     exit_code = 0
     try:
@@ -69,8 +72,8 @@ def main(argv=None):
         if not args.workers_only:
             print(f'SO101: http://127.0.0.1:{args.port} (loopback only)', flush=True)
         if args.live:
-            print('Live window: Qwen at most 201 calls; Jev at most 200 calls; session 600s. No automatic renewal.', flush=True)
-            print('Experimental simulator tasks: at most 200 Jev calls/420s per task; full images to Qwen, one Jev-selected action, then fresh images. Completion is Qwen assessment; runtime guards may stop execution. No physical hardware control.', flush=True)
+            print(f'Control mode: {args.mode}; Qwen at most 201 calls; Jev at most {200 if args.mode == "two_model" else 0} calls; session 600s. No automatic renewal.', flush=True)
+            print('Experimental simulator tasks: at most 200 action decisions/420s per task; full images to Qwen, one bounded selected action, then fresh images. Completion is Qwen assessment; runtime guards may stop execution. No physical hardware control.', flush=True)
             print(f'Progress reconsideration every {args.cycle_max_calls} actions, without an extra model call.', flush=True)
         else:
             print('Preview mode: simulator task execution disabled; no inference workers started.', flush=True)

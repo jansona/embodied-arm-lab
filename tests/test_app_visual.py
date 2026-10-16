@@ -33,7 +33,7 @@ def test_new_app_routes_have_no_legacy_pipeline_or_oracle():
         assert 'perception' not in state and 'oracle' not in c.get('/api/frames').json()
         assert c.post('/api/observe',json={}).status_code==404
         assert c.post('/api/waypoint',json={'object_id':'red'}).status_code==404
-        assert app.state.service.budgets=={'cycle_max_calls':32,'max_calls':200,'max_seconds':420}
+        assert app.state.service.budgets=={'cycle_max_calls':32,'max_calls':200,'max_seconds':420,'mode':'qwen_direct'}
     assert app.state.service.closed and app.state.sim.closed
     source=Path('embodied_arm/web/app_visual.py').read_text()
     for old in ('CameraSceneSource','manipulation','brain_ipc','vision_ipc','app_so101'):
@@ -86,3 +86,18 @@ def test_deferred_close_runs_once_after_late_provider_settles():
     deadline=time.monotonic()+2
     while not app.state.sim.closed and time.monotonic()<deadline:time.sleep(.01)
     assert app.state.sim.closed and app.state.sim.closes==1
+
+
+def test_default_direct_live_constructs_only_qwen_bridge(monkeypatch):
+    from embodied_arm.runtime import visual_loop_ipc
+    made=[]
+    def bridge(*,component):made.append(component);return Provider()
+    monkeypatch.setattr(visual_loop_ipc,'FileVisualBridge',bridge)
+    app=create_app(Sim,service_factory=Service,live=True)
+    with TestClient(app) as c:
+        assert made==['qwen'] and app.state.jev is None
+        assert app.state.service.budgets['mode']=='qwen_direct'
+        assert c.get('/api/state').json()['jev']['enabled'] is False
+    made.clear()
+    with TestClient(create_app(Sim,service_factory=Service,live=True,mode='two_model')):
+        assert made==['qwen','jev']

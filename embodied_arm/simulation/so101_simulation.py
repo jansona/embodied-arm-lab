@@ -122,7 +122,7 @@ class SO101Simulation:
             rgb=self._rgb(camera_id);self._renders[camera_id]=(time.monotonic(),rgb);return rgb
     def manual(self,action,values=None,*,origin="manual"):
         with self.lock:
-            if origin not in ('manual','jev','offline_fixture'):raise ValueError('Invalid command provenance')
+            if origin not in ('manual','jev','qwen','offline_fixture'):raise ValueError('Invalid command provenance')
             if self.paused or self.current or self.queue:raise ValueError('Resume an idle robot before moving')
             if action=='xyz':
                 xyz=list(values) if isinstance(values,(list,tuple)) else []

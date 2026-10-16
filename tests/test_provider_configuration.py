@@ -107,3 +107,12 @@ def test_canonical_example_uses_split_v2_schema_with_empty_keys():
  assert not (root/'config/provider-v2.example.json').exists()
  legacy=json.loads((root/'config/provider-legacy.example.json').read_text())
  assert 'schema_version' not in legacy and legacy['api_key']==''
+
+
+def test_component_scoped_brain_only_configuration():
+ data=config();del data['cerebellum']
+ assert set(parse_configuration(data,component='brain'))=={'brain'}
+ with pytest.raises(ValueError):parse_configuration(data,component='cerebellum')
+ with pytest.raises(ValueError):parse_configuration(data)
+ data['extra']='not allowed'
+ with pytest.raises(ValueError):parse_configuration(data,component='brain')

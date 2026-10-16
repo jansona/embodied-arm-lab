@@ -1,4 +1,4 @@
-"""Simulation-only Qwen visual decisions followed by one Jev actuator choice.
+"""Simulation-only Qwen direct actions, with an explicit two-model comparison mode.
 
 No image interpretation, object geometry or task recipes are implemented here.
 """
@@ -11,12 +11,15 @@ from embodied_arm.providers.visual_brain import sanitize_robot, frame_snapshot, 
 
 
 class VisualActionLoop:
-    def __init__(self, sim, qwen, jev, *, cycle_max_calls=32, max_calls=200,
+    def __init__(self, sim, qwen, jev=None, *, mode="qwen_direct", cycle_max_calls=32, max_calls=200,
                  max_seconds=420, clock=time.monotonic, sleep=time.sleep):
+        if mode not in ('qwen_direct','two_model'): raise ValueError('invalid_control_mode')
+        if mode=='two_model' and jev is None: raise ValueError('jev_required')
+        self.mode=mode
         if type(cycle_max_calls) is not int or not 1<=cycle_max_calls<=200: raise ValueError('invalid_cycle_budget')
         if type(max_calls) is not int or not 1<=max_calls<=200: raise ValueError('invalid_call_budget')
         if type(max_seconds) not in (int,float) or not math.isfinite(max_seconds) or not 1<=max_seconds<=420: raise ValueError('invalid_deadline')
-        self.sim,self.qwen,self.jev=sim,qwen,jev
+        self.sim,self.qwen,self.jev=sim,qwen,(jev if mode=="two_model" else None)
         self.cycle_max_calls,self.max_calls,self.max_seconds=cycle_max_calls,max_calls,max_seconds
         self.clock,self.sleep=clock,sleep
         self.lock=threading.RLock();self.cancelled=threading.Event();self.thread=None
@@ -24,7 +27,7 @@ class VisualActionLoop:
 
     def _empty(self):
         return dict(id=None,state='idle',pending=False,events=[],observation=None,controller_calls=0,
-                    controller_actions=0,qwen_calls=0,cycle_index=0,outcome=None)
+                    controller_actions=0,decision_calls=0,qwen_calls=0,cycle_index=0,outcome=None)
 
     def _event(self,state,**detail):
         with self.lock:
@@ -35,9 +38,9 @@ class VisualActionLoop:
     def status(self):
         with self.lock:
             out=deepcopy(self.record);out['history']=deepcopy(self.history);out['runtime_notices']=deepcopy(self.notices)
-        try: ready=bool(self.qwen.status().get('available')) and bool(self.jev.status().get('available'))
+        try: ready=bool(self.qwen.status().get('available')) and (self.mode=='qwen_direct' or bool(self.jev.status().get('available')))
         except Exception: ready=False
-        out.update(execution_available=ready,unavailable_reason=None if ready else 'provider_unavailable',
+        out.update(control_mode=self.mode,execution_available=ready,unavailable_reason=None if ready else 'provider_unavailable',
                    execution_validation='experimental_simulation',cycle_max_calls=self.cycle_max_calls,
                    max_calls=self.max_calls,max_seconds=self.max_seconds)
         return out
@@ -75,7 +78,7 @@ class VisualActionLoop:
             while True:
                 self._check(deadline)
                 if not self.qwen.status().get('available'): raise RuntimeError('qwen_unavailable')
-                if execute and self.record['controller_calls']==0 and not self.jev.status().get('available'): raise RuntimeError('jev_unavailable')
+                if execute and self.mode=='two_model' and self.record['decision_calls']==0 and not self.jev.status().get('available'): raise RuntimeError('jev_unavailable')
                 self._event('observing',phase='observing')
                 robot=self._robot();captured=self.sim.capture_frames();packet=frame_snapshot(captured)
                 # These labels are fixed camera mount metadata, not image inference.
@@ -83,10 +86,10 @@ class VisualActionLoop:
                     for image in packet['images']:
                         image['camera_id']={'left':'observer','right':'wrist'}.get(image['camera_id'],image['camera_id'])
                 self._check(deadline);self._unchanged(robot)
-                review=bool(self.record['controller_calls'] and self.record['controller_calls']%self.cycle_max_calls==0)
+                review=bool(self.record['decision_calls'] and self.record['decision_calls']%self.cycle_max_calls==0)
                 if review:
                     self.record['cycle_index']+=1
-                    self._event('reviewing',phase='cycle_review',calls=self.record['controller_calls'],actions=self.record['controller_actions'])
+                    self._event('reviewing',phase='cycle_review',calls=self.record['qwen_calls']+self.record['controller_calls'],actions=self.record['controller_actions'])
                 self.record['qwen_calls']+=1
                 result=self.qwen.observe(text,packet,robot,history={'previous_observation':previous,'applied_actions':recent[-8:]},review=review)
                 self._check(deadline);self._unchanged(robot);frame_snapshot(packet)
@@ -104,18 +107,23 @@ class VisualActionLoop:
                     with self.lock:
                         self._check(deadline)
                         self.record['outcome']={'completion_basis':'qwen_visual_assessment','model_assessed_complete':bool(execute and decision=='completed'),
-                            'reason':decision,'calls':self.record['controller_calls'],'actions':self.record['controller_actions']}
+                            'reason':decision,'calls':self.record['decision_calls'],'jev_calls':self.record['controller_calls'],'actions':self.record['controller_actions']}
                         self._event(state,phase='visual_judgment',decision=decision)
                     break
-                if self.record['controller_calls']>=self.max_calls: raise RuntimeError('call_budget')
-                if not self.jev.status().get('available'): raise RuntimeError('jev_unavailable')
-                self.record['controller_calls']+=1
-                answer=self.jev.decide(observation,robot)
-                from embodied_arm.providers.visual_cerebellum import validate_jev_result
-                answer=validate_jev_result(answer)
+                if self.record['decision_calls']>=self.max_calls: raise RuntimeError('call_budget')
+                self.record['decision_calls']+=1
+                if self.mode=='two_model':
+                    if not self.jev.status().get('available'): raise RuntimeError('jev_unavailable')
+                    self.record['controller_calls']+=1
+                    answer=self.jev.decide(observation,robot)
+                    from embodied_arm.providers.visual_cerebellum import validate_jev_result
+                    answer=validate_jev_result(answer)
+                else:
+                    answer={'accepted':True,'action':observation['action'],'proposed_action':observation['action'],
+                            'confidence':observation['confidence'],'reason':'accepted'}
                 self._check(deadline);self._unchanged(robot);frame_snapshot(packet)
                 self._event('executing',phase='decision_received',action=answer['proposed_action'],accepted=answer['accepted'],
-                            confidence=answer['confidence'],calls=self.record['controller_calls'],actions=self.record['controller_actions'])
+                            confidence=answer['confidence'],provenance=self.mode,decision_calls=self.record['decision_calls'],calls=self.record['qwen_calls']+self.record['controller_calls'],actions=self.record['controller_actions'])
                 if not answer['accepted']: raise RuntimeError('jev_'+answer['reason'])
                 action=answer['action'];applied=False
                 if action!='hold':
@@ -126,14 +134,14 @@ class VisualActionLoop:
                         if action in ('gripper_open_10pct','gripper_close_10pct'):
                             target=robot['gripper_openness']+(.1 if action=='gripper_open_10pct' else -.1)
                             if not 0<=target<=1:raise RuntimeError('mechanical_limit')
-                            self.sim.manual('gripper',target,origin='jev')
+                            self.sim.manual('gripper',target,origin='qwen' if self.mode=='qwen_direct' else 'jev')
                         else:
                             axis,sign,size=action.split('_');target=list(robot['ee'])
                             target['xyz'.index(axis)]+=(float(size[:-2])/1000)*(1 if sign=='plus' else -1)
-                            self.sim.manual('xyz',target,origin='jev')
+                            self.sim.manual('xyz',target,origin='qwen' if self.mode=='qwen_direct' else 'jev')
                         applied=True;self.record['controller_actions']+=1
                         recent.append(dict(action=action,applied=True))
-                        self._event('executing',phase='motion_applied',action=action,calls=self.record['controller_calls'],actions=self.record['controller_actions'])
+                        self._event('executing',phase='motion_applied',action=action,calls=self.record['qwen_calls']+self.record['controller_calls'],actions=self.record['controller_actions'])
                     motion_deadline=min(deadline,self.clock()+15)
                     while self._robot()['busy']:
                         self._check(motion_deadline);self.sleep(.01)
@@ -144,13 +152,13 @@ class VisualActionLoop:
                 else: recent.append(dict(action=action,applied=False))
                 self._check(deadline)
                 self._event('executing',phase='motion_completed',action=action,applied=applied,
-                            calls=self.record['controller_calls'],actions=self.record['controller_actions'])
+                            calls=self.record['qwen_calls']+self.record['controller_calls'],actions=self.record['controller_actions'])
         except Exception as exc:
             reason=str(exc) if isinstance(exc,(RuntimeError,ValueError)) else 'execution_error'
             allowed={'cancelled','deadline','call_budget','robot_changed_during_decision','qwen_unavailable','jev_unavailable','stale_frame','mechanical_limit'}
             if reason not in allowed and not reason.startswith(('qwen_','jev_')): reason='execution_error'
             self.sim.stop()
-            self.record['outcome']={'model_assessed_complete':False,'reason':reason,'calls':self.record['controller_calls'],'actions':self.record['controller_actions']}
+            self.record['outcome']={'model_assessed_complete':False,'reason':reason,'calls':self.record['decision_calls'],'jev_calls':self.record['controller_calls'],'actions':self.record['controller_actions']}
             self._event('cancelled' if self.cancelled.is_set() else 'failed',phase='stopped',reason=reason)
             self.notices.append(dict(request_id=self.record['id'],reason=reason,text='Task stopped; completion has not been established.'))
             self.notices=self.notices[-40:]
@@ -162,7 +170,7 @@ class VisualActionLoop:
             self.cancelled.set();self.sim.stop()
             if self.record['pending']:self._event('stopping',phase='stopping')
         for client in (self.qwen,self.jev):
-            if hasattr(client,'cancel'):client.cancel()
+            if client is not None and hasattr(client,'cancel'):client.cancel()
 
     def reset(self):
         with self.lock:

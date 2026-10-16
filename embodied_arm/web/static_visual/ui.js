@@ -5,7 +5,7 @@ function providerReady(provider){return Boolean(provider?.available??provider?.c
 function textValue(value){return typeof value==='string'?value:JSON.stringify(value)}
 function eventText(event){
 const d=event.detail||{};if(typeof d==='string')return errorLabel(d);
-const names={observing:'获取完整相机图像',visual_decision:'Qwen 图像判断',decision_received:'Jev 决策已收到，尚不代表动作已施加',motion_applied:'动作指令已施加，运动与图像结果待确认',motion_completed:'本次微动作结束，不代表任务完成',visual_judgment:'Qwen 图像判断结果（不是独立几何验证）',stopped:'运行已停止',stopping:'正在停止',cycle_review:'暂停微动作，Qwen 根据新图像复核'};
+const names={observing:'获取完整相机图像',visual_decision:'Qwen 图像判断',decision_received:'动作决策已收到，尚不代表动作已施加',motion_applied:'动作指令已施加，运动与图像结果待确认',motion_completed:'本次微动作结束，不代表任务完成',visual_judgment:'Qwen 图像判断结果（不是独立几何验证）',stopped:'运行已停止',stopping:'正在停止',cycle_review:'暂停微动作，Qwen 根据新图像复核'};
 const parts=[names[d.phase]||d.phase||event.state||'进度更新'];
 for(const [key,label] of Object.entries({observation:'观察',instruction:'任务指引',goal:'当前目标',action:'动作',decision:'结构化判断',accepted:'决策是否通过接收检查',applied:'动作是否已施加',confidence:'置信度',reason:'原因',provenance:'来源',calls:'模型请求数',actions:'已应用动作数',iteration:'轮次',frame_id:'图像帧'}))if(d[key]!==undefined)parts.push(label+'：'+textValue(d[key]));
 return parts.join(' · ');
@@ -25,13 +25,15 @@ return parts.length?label+' 会话：'+parts.join('，'):label+' 会话预算未
 }
 function render(state){
 lastState=state;const w=state.workflow||{},q=state.qwen||{},j=state.jev||{};
+const direct=w.control_mode==='qwen_direct';
+$('control-mode').textContent=direct?'Qwen 直接视觉控制 · Qwen 选择动作，Jev 未启用':w.control_mode==='two_model'?'双模型控制 · Qwen 观察，Jev 选择动作':'控制模式尚未提供';
 const active=Boolean(w.pending||['queued','observing','planning','executing','replanning','reviewing','stopping'].includes(w.state));
 $('request').disabled=active||mutation;$('task-send').disabled=active||mutation||!w.execution_available||!providerReady(q);$('chat-send').disabled=active||mutation||!providerReady(q);$('stop').disabled=!active||mutation;$('reset').disabled=active||mutation;
 $('input-status').textContent=active?'任务处理中，输入已锁定；请先停止并等待确认。':'Enter 提交执行任务，Shift + Enter 换行。';
 $('readiness').textContent=w.execution_available&&providerReady(q)?'任务执行服务已就绪。提交后将根据完整图像尝试执行。':'当前不能执行任务：'+errorLabel(w.unavailable_reason||(!providerReady(q)?'qwen_unavailable':'execution_unavailable'))+' 没有任务排队。';
-const labels={idle:'尚未提交任务',queued:'任务已提交',observing:'正在观察相机图像',planning:'Qwen 正在理解任务',executing:'Jev 正在执行有界动作',replanning:'Qwen 正在复核新图像',reviewing:'Qwen 正在复核新图像',blocked:'任务受阻',failed:'任务失败',cancelled:w.pending?'正在停止，等待待处理调用退出':'任务已停止',preview:'仅交流结果，无动作执行',clarification:'需要澄清，未继续动作',stopped:'Qwen 要求停止',completed:'流程已结束',stopping:'正在停止'};
+const labels={idle:'尚未提交任务',queued:'任务已提交',observing:'正在观察相机图像',planning:'Qwen 正在理解任务',executing:'正在执行模型选择的有界动作',replanning:'Qwen 正在复核新图像',reviewing:'Qwen 正在复核新图像',blocked:'任务受阻',failed:'任务失败',cancelled:w.pending?'正在停止，等待待处理调用退出':'任务已停止',preview:'仅交流结果，无动作执行',clarification:'需要澄清，未继续动作',stopped:'Qwen 要求停止',completed:'流程已结束',stopping:'正在停止'};
 $('request-id').textContent=w.id?'请求 '+w.id.slice(0,8):'';$('workflow-status').textContent=(labels[w.state]||w.state||'')+(w.error?' · '+errorLabel(w.error):'');
-const counts=[];for(const [key,label] of Object.entries({qwen_calls:'Qwen 请求',controller_calls:'Jev 请求',controller_actions:'已施加动作',cycle_index:'周期索引'}))if(Number.isFinite(w[key]))counts.push(label+' '+w[key]);$('budgets').textContent='本任务请求记录：'+(counts.join(' · ')||'暂无')+'。 '+sessionBudget('Qwen',q)+'；'+sessionBudget('Jev',j);
+const counts=[];for(const [key,label] of Object.entries({qwen_calls:'Qwen 请求',decision_calls:'动作决策请求',controller_calls:'实际 Jev 请求',controller_actions:'已施加动作',cycle_index:'周期索引'}))if(Number.isFinite(w[key]))counts.push(label+' '+w[key]);$('budgets').textContent='本任务请求记录：'+(counts.join(' · ')||'暂无')+'。 '+sessionBudget('Qwen',q)+'；'+(direct?'Jev 未启用':sessionBudget('Jev',j));
 $('chat-history').replaceChildren();for(const m of w.history||[]){const p=document.createElement('p');p.className='message';p.textContent=(m.role==='user'?'你：':'Qwen 输出（不是系统执行状态）：')+(m.content||m.text||'');$('chat-history').appendChild(p)}
 $('runtime-notices').replaceChildren();for(const n of w.runtime_notices||[]){const p=document.createElement('p');p.className='notice';p.textContent='系统反馈 · '+(n.request_id||'')+' · '+(n.request_text||'')+' · '+errorLabel(n.reason||n.message||'请求未完成');$('runtime-notices').appendChild(p)}
 $('events').replaceChildren();for(const event of w.events||[]){const li=document.createElement('li');li.textContent=eventText(event);$('events').appendChild(li)}
