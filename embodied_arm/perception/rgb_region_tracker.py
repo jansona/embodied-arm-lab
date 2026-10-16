@@ -88,9 +88,10 @@ class RGBRegionTracker:
     tuple. required_objects is fixed at start; nonrequired points are never cached
     or returned for control, even if the initial full-scene refinement found them.
     """
-    def __init__(self, *, clock: Callable[[], float] | None = None, refinement_profile="baseline", semantic_lifetime_s=SEMANTIC_LIFETIME_S, max_tracking_frames=MAX_TRACKING_FRAMES):
+    def __init__(self, *, clock: Callable[[], float] | None = None, refinement_profile="baseline", semantic_lifetime_s=SEMANTIC_LIFETIME_S, max_tracking_frames=MAX_TRACKING_FRAMES, moving_wrist=False):
         if refinement_profile not in ("baseline","scaled"):raise ValueError("Unknown RGB refinement profile")
         if not 0 < semantic_lifetime_s <= 120 or type(max_tracking_frames) is not int or not 1 <= max_tracking_frames <= 120:raise ValueError('Invalid bounded tracking lease')
+        self.moving_wrist=bool(moving_wrist);self._geometry=None
         self.semantic_lifetime_s=float(semantic_lifetime_s);self.max_tracking_frames=max_tracking_frames
         self.refinement_profile=refinement_profile
         self.initial_source=INITIAL_SOURCE if refinement_profile=="baseline" else "hybrid_qwen_region_rgb_geometry_scaled"
@@ -167,7 +168,7 @@ class RGBRegionTracker:
 
     def start(self, packet: dict, canonical_ai_detections: Sequence[PixelDetection], epoch: int,
               *, now: float | None = None,
-              required_objects: Sequence[str] = ('red', 'blue', 'goal')) -> RefinedPacket:
+              required_objects: Sequence[str] = ('red', 'blue', 'goal'), calibrations=None) -> RefinedPacket:
         with self._lock:
             # A new semantic start replaces any prior lease even if it fails.
             self._session = None
@@ -206,11 +207,33 @@ class RGBRegionTracker:
                                      _dimensions(snapshot), required_objects, required_detections,
                                      snapshot['frame_id'], snapshot['captured_at'], completed_at,
                                      frozenset((snapshot['frame_id'],)))
+            if self.moving_wrist:
+                from embodied_arm.perception.moving_camera_geometry import frames_from_packet
+                from embodied_arm.perception.camera_perception import estimate_scene, PerceptionConfig
+                try:
+                    frames=frames_from_packet(dict(snapshot,calibrations=calibrations))
+                    scene=estimate_scene(frames,required_detections,now=stamp,
+                        workspace=((0.,.4),(-.25,.25),(-.005,.35)),
+                        config=PerceptionConfig(max_frame_age_s=60.,max_position_std_m=.003,max_ray_separation_m=.006))
+                    points={obj:scene.require(obj,now=stamp,max_age_s=60.).xyz for obj in required_objects}
+                    self._geometry=({f.camera_id:f.calibration for f in frames},points)
+                except (ValueError,TypeError,KeyError):
+                    return self._fail('initial_moving_geometry_rejected',source=self.initial_source)
             self._last_reason = 'semantic_anchors_initialized'
             return RefinedPacket(True, 'required_visible_faces_refined', required_detections,
                                  required_evidence, self.initial_source)
 
-    def track(self, packet: dict, epoch: int, *, now: float | None = None) -> RefinedPacket:
+    def projected_seeds(self, calibrations):
+        if not self.moving_wrist or self._geometry is None or self._session is None:
+            raise ValueError('Moving RGB anchors unavailable')
+        from embodied_arm.perception.moving_camera_geometry import compatible_calibrations,reproject_detections
+        from embodied_arm.perception.camera_perception import CameraCalibration
+        current={c['camera_id']:CameraCalibration.from_dict(c) for c in calibrations}
+        original,points=self._geometry
+        if not compatible_calibrations(original,current,moving_wrist=True):raise ValueError('Camera calibration changed')
+        return reproject_detections(self._session.anchors,points,current)
+
+    def track(self, packet: dict, epoch: int, *, now: float | None = None, calibrations=None) -> RefinedPacket:
         with self._lock:
             session = self._session
             if session is None:
@@ -240,7 +263,18 @@ class RGBRegionTracker:
                 return self._fail('nonincreasing_capture_time')
             # Always reuse INITIAL refined semantic anchors, never the previous
             # result. Only frame provenance changes for the new image pair.
-            anchors = {(item.camera_id, item.object_id): item for item in session.anchors}
+            initial_anchors=session.anchors
+            if self.moving_wrist:
+                from embodied_arm.perception.moving_camera_geometry import compatible_calibrations,reproject_detections
+                from embodied_arm.perception.camera_perception import CameraCalibration
+                try:
+                    current={c['camera_id']:CameraCalibration.from_dict(c) for c in calibrations}
+                    original,points=self._geometry
+                    if not compatible_calibrations(original,current,moving_wrist=True):
+                        return self._fail('camera_calibration_changed')
+                    initial_anchors=reproject_detections(initial_anchors,points,current)
+                except (ValueError,TypeError,KeyError):return self._fail('moving_view_projection_rejected')
+            anchors = {(item.camera_id, item.object_id): item for item in initial_anchors}
             # The unchanged refiner requires six schema slots. Nonrequired slots
             # explicitly have no pixel anchor and are skipped, never reused.
             seeds = tuple(replace(anchors[(camera, obj)], frame_id=snapshot['frame_id'])

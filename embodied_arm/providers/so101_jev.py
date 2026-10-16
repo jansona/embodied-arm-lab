@@ -12,6 +12,7 @@ import math
 import threading
 
 import httpx
+from embodied_arm.providers.request_telemetry import RequestTelemetry
 from embodied_arm.providers.adapters import ALIYUN_ENDPOINT, ALIYUN_MODEL, MAX_RESPONSE_BYTES
 
 SCHEMA='so101-jev-observation-v1'
@@ -22,6 +23,17 @@ ROBOT_FIELDS={'name','arm_dof','ee','joints','joint_limits','gripper_openness','
               'paused','busy','epoch','actions','workspace','cube_edge_m'}
 CARTESIAN_CHOICES=('positive','negative','hold')
 GRIPPER_CHOICES=('open','close','hold')
+ROLE_INSTRUCTIONS = (
+    "You are Jev, the SO-ARM101 cerebellum for this simulation. Qwen is the lower-frequency "
+    "high-level planner; the runtime grounds its symbolic goal into this local target. "
+    "You make one frequent fresh-state microdecision per request, never a full task plan or queued trajectory. "
+    "Answer only the action choice question using its supplied candidates and normal choice confidence/probabilities; "
+    "do not add chat, explanations, coordinates, or reasoning. Report uncertainty honestly; confidence below .65 "
+    "is rejected without a substitute action. Hold means the stated local tolerance criterion, not task success. "
+    "The runtime re-observes after motion and owns collision checks, stale-state rejection, cancellation and budgets. "
+    "At a cycle cap it pauses for fresh Qwen planning; you cannot reset global limits or assert a grasp succeeded. "
+)
+
 
 
 def _number(value):
@@ -104,7 +116,7 @@ def request_preview(observation):
                   'close':'signed_openness_error < -tolerance. Command full close (normalized openness 0).',
                   'hold':'-tolerance <= signed_openness_error <= tolerance. Keep the gripper unchanged; this does not verify a grasp.'}
     return {'endpoint':ALIYUN_ENDPOINT,'method':'POST','body':{'model':ALIYUN_MODEL,'state':state,
-            'questions':{'action':{'type':'choice','instructions':instructions,'criteria':criteria}}}}
+            'questions':{'action':{'type':'choice','instructions':ROLE_INSTRUCTIONS+instructions,'criteria':criteria}}}}
 
 
 @dataclass(frozen=True)
@@ -175,6 +187,7 @@ class SO101JevAdapter:
         if not _number(min_confidence) or not MIN_CONFIDENCE<=min_confidence<=1:raise ValueError('Confidence cannot be reduced below .65')
         if not _number(timeout) or not 0<timeout<=30 or type(max_calls) is not int or not 1<=max_calls<=200:raise ValueError('Invalid request bounds')
         if type(use_environment_network) is not bool:raise ValueError('Explicit network mode must be boolean')
+        self.last_request=None
         self._key=api_key;self.min_confidence=min_confidence;self.calls=0;self.max_calls=max_calls
         self._lock=threading.Lock();self._closed=False
         self._client=httpx.Client(timeout=httpx.Timeout(timeout),follow_redirects=False,trust_env=use_environment_network,transport=transport,
@@ -209,14 +222,21 @@ class SO101JevAdapter:
             if self._closed:return SO101Decision(reason='closed',axis_index=axis)
             if self.calls>=self.max_calls:return SO101Decision(reason='call_budget',axis_index=axis)
             self.calls+=1
+            telemetry=RequestTelemetry(self, 'cerebellum')
+            def finish(result):
+                telemetry.finish(result.reason)
+                return result
             try:
                 with self._client.stream('POST',ALIYUN_ENDPOINT,headers={'Authorization':'Bearer '+self._key,'Accept':'application/json'},json=body) as response:
-                    if response.status_code!=200:return SO101Decision(reason='api_error',axis_index=axis)
+                    telemetry.response(response)
+                    if response.status_code!=200:return finish(SO101Decision(reason='api_error',axis_index=axis))
                     raw=bytearray()
                     for chunk in response.iter_bytes():
                         raw.extend(chunk)
-                        if len(raw)>MAX_RESPONSE_BYTES:return SO101Decision(reason='response_too_large',axis_index=axis)
-                return parse_response(json.loads(raw),obs,self.min_confidence)
-            except httpx.TimeoutException:return SO101Decision(reason='timeout',axis_index=axis)
-            except httpx.HTTPError:return SO101Decision(reason='network_error',axis_index=axis)
-            except (ValueError,TypeError,UnicodeError,RecursionError):return SO101Decision(reason='invalid_response',axis_index=axis)
+                        if len(raw)>MAX_RESPONSE_BYTES:return finish(SO101Decision(reason='response_too_large',axis_index=axis))
+                payload=json.loads(raw)
+                telemetry.payload(payload)
+                return finish(parse_response(payload,obs,self.min_confidence))
+            except httpx.TimeoutException:return finish(SO101Decision(reason='timeout',axis_index=axis))
+            except httpx.HTTPError:return finish(SO101Decision(reason='network_error',axis_index=axis))
+            except (ValueError,TypeError,UnicodeError,RecursionError):return finish(SO101Decision(reason='invalid_response',axis_index=axis))

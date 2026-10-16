@@ -63,7 +63,15 @@ def test_paired_rgb_capture_calibration_and_no_depth_masks(sim, monkeypatch):
     monkeypatch.setattr(sim, "call", inspect_call)
     monkeypatch.setattr(sim, "evaluation_state", lambda: pytest.fail("Unexpected evaluation oracle"))
     frame = sim.capture_frames()
-    assert set(frame) == {"frame_id", "captured_at", "images", "calibrations"}
+    assert set(frame) == {"frame_id", "captured_at", "images", "calibrations", "camera_profile", "view_metadata"}
+    assert frame['camera_profile']=='legacy_fixed_stereo'
+    assert len(frame['view_metadata'])==2
+    for view,calibration in zip(frame['view_metadata'],frame['calibrations']):
+        assert set(view)=={'camera_id','frame_id','captured_at','role','extrinsics_source','calibration'}
+        assert view['camera_id']==calibration['camera_id']
+        assert view['frame_id']==frame['frame_id'] and view['captured_at']==frame['captured_at']
+        assert view['role']=='observer' and view['extrinsics_source']=='fixed_calibration'
+        assert view['calibration']==calibration
     assert isinstance(frame["captured_at"], float) and len(frame["frame_id"]) == 32
     assert len(frame["images"]) == len(frame["calibrations"]) == 2
     assert {image["camera_id"] for image in frame["images"]} == set(CAMERAS)

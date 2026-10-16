@@ -8,12 +8,12 @@ return `${band.axis.toUpperCase()}：误差诊断区间 [${(band.interval_m[0]*1
 }
 function formatTaskError(code){
 if(code&&typeof code==='object')code=code.code||code.reason||'observation_unavailable';
-const labels={timeout:'视觉请求超时，未获得有效观察；没有执行动作。',expired:'视觉会话已到期，自动观察未完成；没有执行动作。',call_budget_exhausted:'视觉请求预算已用完，自动观察未完成；没有执行动作。',landmark_uncertain:'图像定位不够精确，不能安全生成动作；没有执行动作。',occluded:'目标被遮挡，未获得可靠观察；没有执行动作。',occluded_or_missing_feature:'目标被遮挡或缺少可识别特征；没有执行动作。',uncertain_detection:'图像检测不确定；没有执行动作。',low_confidence:'视觉识别置信度不足；没有执行动作。',unavailable:'视觉服务当前不可用；没有执行动作。',scene_changed_during_vision:'识别期间场景改变，结果已丢弃；没有执行动作。',invalid_or_stale_frame:'识别图像无效或已过期；没有执行动作。',stale_frame:'识别图像已过期；没有执行动作。',vision_unavailable:'视觉服务未启动或已到期，自动识别未能开始；没有执行动作，无需上传图片。',network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',vision_network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',camera_capture_failed:'模拟相机采样失败；没有执行动作，请查看相机状态。',jev_unavailable:'Jev 控制器会话不可用；执行不会启动，仍可发送消息或生成计划预览。',controller_readiness_unknown:'无法确认 Jev 控制器是否就绪；执行不会启动，仍可发送消息或生成计划预览。',visual_execution_not_validated:'本次服务没有可用的任务执行器；只能显式生成预览。',brain_unavailable:'Qwen 对话服务离线，本次请求未发送。',execution_unavailable:'任务执行器当前不可用；没有执行动作。',task_busy:'已有任务正在处理，本次请求未发送。',invalid_text:'请输入 1 到 2000 字的消息。',observation_unavailable:'无法取得有效视觉观察，没有执行动作。',planning_failed:'Qwen 请求失败或规划未通过校验，没有执行动作。',brain_rejected:'Qwen 回复未通过校验，没有执行动作。',unexpected_motion_plan:'仅对话模式收到动作计划，已拒绝；没有执行动作。',unsupported_task:'当前执行器不支持该任务，没有执行动作。',execution_failed:'执行途中失败，机械臂已停止；任务未完成。',execution_unverified:'动作结果未通过验证，机械臂已停止；不能确认任务完成。'};
+const labels={cycle_review_budget:'周期复核预算已用完，任务已停止；未确认完成。',planner_stopped_cycle:'Qwen 周期复核决定停止，后续动作未启动；未确认任务完成。',timeout:'视觉请求超时，未获得有效观察；没有执行动作。',expired:'视觉会话已到期，自动观察未完成；没有执行动作。',call_budget_exhausted:'视觉请求预算已用完，自动观察未完成；没有执行动作。',landmark_uncertain:'图像定位不够精确，不能安全生成动作；没有执行动作。',occluded:'目标被遮挡，未获得可靠观察；没有执行动作。',occluded_or_missing_feature:'目标被遮挡或缺少可识别特征；没有执行动作。',uncertain_detection:'图像检测不确定；没有执行动作。',low_confidence:'视觉识别置信度不足；没有执行动作。',unavailable:'视觉服务当前不可用；没有执行动作。',scene_changed_during_vision:'识别期间场景改变，结果已丢弃；没有执行动作。',invalid_or_stale_frame:'识别图像无效或已过期；没有执行动作。',stale_frame:'识别图像已过期；没有执行动作。',vision_unavailable:'视觉服务未启动或已到期，自动识别未能开始；没有执行动作，无需上传图片。',network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',vision_network_error:'视觉服务网络请求失败，自动观察未完成；没有执行动作，无需上传图片。',camera_capture_failed:'模拟相机采样失败；没有执行动作，请查看相机状态。',jev_unavailable:'Jev 控制器会话不可用；执行不会启动，仍可发送消息或生成计划预览。',controller_readiness_unknown:'无法确认 Jev 控制器是否就绪；执行不会启动，仍可发送消息或生成计划预览。',visual_execution_not_validated:'本次服务没有可用的任务执行器；只能显式生成预览。',brain_unavailable:'Qwen 对话服务离线，本次请求未发送。',execution_unavailable:'任务执行器当前不可用；没有执行动作。',task_busy:'已有任务正在处理，本次请求未发送。',invalid_text:'请输入 1 到 2000 字的消息。',observation_unavailable:'无法取得有效视觉观察，没有执行动作。',planning_failed:'Qwen 请求失败或规划未通过校验，没有执行动作。',brain_rejected:'Qwen 回复未通过校验，没有执行动作。',unexpected_motion_plan:'仅对话模式收到动作计划，已拒绝；没有执行动作。',unsupported_task:'当前执行器不支持该任务，没有执行动作。',execution_failed:'执行途中失败，机械臂已停止；任务未完成。',execution_unverified:'动作结果未通过验证，机械臂已停止；不能确认任务完成。'};
 return labels[code]||code||'';
 }
 function formatEventDetail(detail){
 if(detail&&typeof detail==='object')return formatLoopEvent(detail);
-const labels={execution_not_requested:'计划已生成，尚未请求执行',plan_preview:'动作计划已生成，仅供预览，未执行动作',observation_cached:'已复用有效视觉观察',observation_refresh:'正在自动识别当前双目图像',conversation_only:'仅对话，未执行动作',visually_verified:'结果验证通过（请结合来源标记判断）'};
+const labels={execution_not_requested:'计划已生成，尚未请求执行',plan_preview:'动作计划已生成，仅供预览，未执行动作',observation_cached:'已复用有效视觉观察',observation_refresh:'正在自动识别当前双相机图像',conversation_only:'仅对话，未执行动作',visually_verified:'结果验证通过（请结合来源标记判断）'};
 return labels[detail]||formatTaskError(detail);
 }
 function formatLoopEvent(detail){
@@ -21,16 +21,18 @@ const iteration=Number.isInteger(detail.iteration)?`第 ${detail.iteration} 轮 
 const action={x_plus:'X 正向微调',x_minus:'X 负向微调',y_plus:'Y 正向微调',y_minus:'Y 负向微调',z_plus:'Z 正向微调',z_minus:'Z 负向微调',open:'打开夹爪',close:'闭合夹爪',hold:'保持'}[detail.action]||detail.action||'未选定动作';
 const count=`${Number.isFinite(detail.calls)?` · Jev ${detail.calls} 次`:''}${Number.isFinite(detail.actions)?` · 已应用 ${detail.actions} 步`:''}`;
 if(detail.phase==='observation')return iteration+'已取得新观察'+(Number.isFinite(detail.observation_age_seconds)?` · 图像年龄 ${detail.observation_age_seconds.toFixed(2)} 秒`:'')+(detail.frame_ids?' · 帧 '+Object.values(detail.frame_ids).join(' / '):'')+(detail.goal?' · 目标 '+formatLoopGoal(detail.goal):'')+count;
-if(detail.phase==='jev_decision')return iteration+`Jev ${detail.accepted?'接受':'拒绝'}决策 · ${action}`+(Number.isFinite(detail.confidence)?` · 置信度 ${detail.confidence.toFixed(2)}`:'')+(detail.provenance?' · 来源 '+detail.provenance:'')+' · 决策接受不代表动作已执行或任务完成';
-if(detail.phase==='motion_completed')return iteration+(detail.applied?'一个微动作已应用；等待新图像反馈':'动作反馈尚未确认')+count;
+if(detail.phase==='jev_decision')return iteration+`Jev ${detail.accepted?'接受':'拒绝'}决策 · ${action}`+(Number.isFinite(detail.confidence)?` · 置信度 ${detail.confidence.toFixed(2)}`:'')+(detail.provenance?' · 来源 '+detail.provenance:'')+formatRoundtrip('Jev',detail.decision_roundtrip_seconds)+' · 决策接受不代表动作已执行或任务完成';
+if(detail.phase==='motion_applied')return iteration+'指令已施加，运动与视觉结果待确认'+count;
+if(detail.phase==='motion_completed')return iteration+(detail.applied?'局部微动作结束并收到新图像反馈；不代表整个任务完成':'动作反馈尚未确认')+count;
 if(detail.phase==='observation_recovery')return `第 ${detail.attempt||1} 次静止重新观察 · 上一次新 RGB 未通过检查；保持停止，尚未确认恢复`+count;
 if(detail.phase==='decision_stale')return iteration+'决策所依据的观察已过期，未应用该决策；需重新观察'+count;
 if(detail.phase==='local_goal_verified')return iteration+'局部航点已验证；整个任务尚需独立图像验证'+count;
+if(detail.reason==='cycle_budget')return `第 ${detail.attempt||1} 次周期复核 · 微动作已暂停；Qwen 正在检查新图像，复核通过后才继续` ;
 if(Number.isInteger(detail.attempt))return `第 ${detail.attempt} 次重新规划 · ${formatLoopReason(detail.reason)}`;
 return [detail.phase,detail.kind,detail.reason?formatLoopReason(detail.reason):null].filter(Boolean).join(' · ')||'执行进度已更新';
 }
 function formatLoopReason(reason){
-const labels={visual_observation_expired:'视觉观察已过期',scene_changed:'场景发生变化',grasp_failed:'抓取未通过图像验证',placement_failed:'放置未通过图像验证',execution_unverified:'执行结果未通过验证',observation_unavailable:'无法取得可靠的新观察',controller_rejected:'Jev 决策未通过接受条件',uncertainty_unresolved:'当前视觉精度不足以确认到达',local_goal_not_reached:'尚未到达局部目标'};
+const labels={cycle_budget:'本周期 Jev 调用额度已到，暂停并请求 Qwen 新图像复核',cycle_review_budget:'周期复核预算已用完，任务停止',visual_observation_expired:'视觉观察已过期',scene_changed:'场景发生变化',grasp_failed:'抓取未通过图像验证',placement_failed:'放置未通过图像验证',execution_unverified:'执行结果未通过验证',observation_unavailable:'无法取得可靠的新观察',controller_rejected:'Jev 决策未通过接受条件',uncertainty_unresolved:'当前视觉精度不足以确认到达',local_goal_not_reached:'尚未到达局部目标'};
 return labels[reason]||formatTaskError(reason)||'正在根据观察修正计划';
 }
 function formatLoopGoal(goal){
@@ -47,12 +49,12 @@ return {clarify:'需要进一步澄清',status:'状态说明',stop:'停止请求
 }
 function formatCameraStatus(camera){
 if(!camera)return '自动相机状态暂不可用';
-const labels={ready:'本地双目图像已更新',capturing:'正在本地采样双目图像',error:'本地相机采样失败',stopped:'本地相机采样已停止'};
+const labels={ready:'本地双相机图像已更新',capturing:'正在本地采样双相机图像',error:'本地相机采样失败',stopped:'本地相机采样已停止'};
 return `${labels[camera.status]||'等待相机采样'} · 每 ${camera.interval_seconds||1} 秒本地采样 · 模型调用 0 次`+(Number.isFinite(camera.age_seconds)?` · 图像年龄 ${camera.age_seconds.toFixed(1)} 秒`:'')+(camera.error?' · '+formatTaskError(camera.error):'')+formatCameraProfile(camera);
 }
 function formatExecutionOutcome(outcome){
 const parts=['执行反馈'];
-if(outcome.reason)parts.push('停止原因：'+formatLoopReason(outcome.reason));
+if(outcome.reason)parts.push((outcome.status==='yielded'?'周期暂停原因：':'停止原因：')+formatLoopReason(outcome.reason));
 if(outcome.perception_detail)parts.push('视觉检查：'+(typeof outcome.perception_detail==='string'?outcome.perception_detail:JSON.stringify(outcome.perception_detail)));
 if(outcome.driver?.reason)parts.push('小脑 / 微动作：'+formatLoopReason(outcome.driver.reason));
 if(Number.isFinite(outcome.calls))parts.push(`Jev ${outcome.calls} 次`);
@@ -67,12 +69,50 @@ const perception=resolution(camera.perception_resolution),preview=resolution(cam
 if(!perception&&!preview)return '';
 return ` · 识别 ${perception||'未知'} / 预览 ${preview||'未知'}`+(camera.illumination_profile?' · 光照 '+camera.illumination_profile:'')+(camera.roi_tracking?' · ROI 本地跟踪':'')+(camera.perception_resolution?.[0]>=1920?' · 高分辨率识别增加 CPU 开销':'');
 }
+function formatRoundtrip(label,seconds){
+return Number.isFinite(seconds)&&seconds>=0?` · 最近 ${label} 请求往返 ${seconds.toFixed(2)} 秒（含 IPC、网络及服务处理）`:'';
+}
+function formatCycleStatus(flow){
+const parts=[];
+if(Number.isInteger(flow.cycle_index))parts.push(`当前第 ${flow.cycle_index+1} 个执行周期`);
+if(Number.isInteger(flow.cycle_max_calls))parts.push(`每周期最多 ${flow.cycle_max_calls} 次 Jev`);
+if(Number.isInteger(flow.cycle_reviews))parts.push(`Qwen 周期复核 ${flow.cycle_reviews} 次`);
+if(Number.isFinite(flow.controller_calls)&&Number.isFinite(flow.max_controller_calls))parts.push(`Jev 累计 ${flow.controller_calls} / ${flow.max_controller_calls} 次，剩余 ${Math.max(0,flow.max_controller_calls-flow.controller_calls)} 次`);
+return (parts.join(' · ')||'执行周期信息尚未提供')+formatRoundtrip('Qwen',flow.brain_roundtrip_seconds);
+}
+function formatPhaseProgress(outcome){
+if(!outcome)return '尚无阶段反馈';
+const phases={approach:'接近目标',descend:'下降对准',close:'闭合夹爪',lift:'抬升',transport:'移动到目标',release:'释放',retreat:'撤离',step_boundary:'步骤交接'};
+const parts=[];
+if(Array.isArray(outcome.completed_step_ids))parts.push('已验证完成步骤：'+(outcome.completed_step_ids.join('、')||'无'));
+if(outcome.active_step_id)parts.push('当前步骤：'+outcome.active_step_id+(outcome.active_step?' · '+formatPlanStep(outcome.active_step):''));
+if(outcome.phase)parts.push('当前阶段：'+(phases[outcome.phase]||outcome.phase));
+if(outcome.holding_state)parts.push('持物反馈：'+(typeof outcome.holding_state==='string'?outcome.holding_state:JSON.stringify(outcome.holding_state)));
+return parts.join(' · ')||'尚无阶段反馈';
+}
+function formatCameraView(metadata,cameraId){
+const role={observer:'固定观察相机',wrist:'腕部相机'}[metadata?.role]||`相机 ${cameraId==='left'?'A':'B'}（角色未提供）`;
+const calibration=metadata?.calibration;
+const fov=calibration&&Number.isFinite(calibration.height)&&calibration.height>0&&Number.isFinite(calibration.fy)&&calibration.fy>0?2*Math.atan(calibration.height/(2*calibration.fy))*180/Math.PI:null;
+return role+' · 模拟 RGB'+(fov!==null?` · 垂直视场 ${fov.toFixed(1)}°`:'')+(metadata?.extrinsics_source==='joint_encoder_fk_rigid_mount'?' · 随机械臂运动（编码器位姿）':'');
+}
+function renderFrames(packet){
+for(const image of packet.images||[]){
+if(!['left','right'].includes(image.camera_id)||!image.data_url?.startsWith('data:image/'))continue;
+const metadata=(packet.view_metadata||[]).find(view=>view.camera_id===image.camera_id);
+$('camera-'+image.camera_id).src=image.data_url;
+$('camera-'+image.camera_id).alt=formatCameraView(metadata,image.camera_id);
+$('camera-'+image.camera_id+'-caption').textContent=formatCameraView(metadata,image.camera_id);
+}
+const profile={observer_wrist:'固定观察 + 腕部视角',legacy_fixed_stereo:'双固定相机'}[packet.camera_profile]||'相机视角';
+$('frame-label').textContent=profile+' · 图像组 '+packet.frame_id+' · 本地 RGB 预览';
+}
 function render(s){const r=s.robot,p=s.perception;
 $('robot-name').textContent=r.name||'SO-ARM101';$('robot-status').textContent=r.paused?'已停止':r.busy?'动作执行中':'空闲';
 $('ee').textContent=Array.isArray(r.ee)?r.ee.map(x=>Number(x).toFixed(4)).join(' / ')+' m':'不可用';
 $('joints').textContent=Array.isArray(r.joints)?r.joints.map(x=>Number(x).toFixed(3)).join(' / '):'不可用';
 $('gripper').textContent=r.gripper_openness==null?'不可用':Number(r.gripper_openness).toFixed(3);
-const labels={ready:'图像估计已通过检查',observing:'正在识别冻结的双目图像…',vision_unconfigured:'视觉模块未配置',stale_or_invalidated:'识别结果已过期或失效；下次场景请求会自动更新，历史估计不能用于动作',vision_unavailable_or_uncertain:'视觉不可用或不确定，拒绝生成可执行坐标',cancelled:'观察已取消',occluded:'目标遮挡，拒绝规划',uncertain_detection:'检测不确定，拒绝规划',landmark_uncertain:'三角测量未通过不确定性检查',frame_mismatch:'检测与相机帧不匹配',scene_changed_during_vision:'识别期间场景改变，结果已丢弃'};
+const labels={ready:'图像估计已通过检查',observing:'正在识别冻结的双相机图像…',vision_unconfigured:'视觉模块未配置',stale_or_invalidated:'识别结果已过期或失效；下次场景请求会自动更新，历史估计不能用于动作',vision_unavailable_or_uncertain:'视觉不可用或不确定，拒绝生成可执行坐标',cancelled:'观察已取消',occluded:'目标遮挡，拒绝规划',uncertain_detection:'检测不确定，拒绝规划',landmark_uncertain:'三角测量未通过不确定性检查',frame_mismatch:'检测与相机帧不匹配',scene_changed_during_vision:'识别期间场景改变，结果已丢弃'};
 $('capture-status').textContent=formatCameraStatus(s.camera);
 $('vision-status').textContent=labels[p.status]||formatTaskError(p.status);
 const fixture=String(p.provenance||'').includes('fixture')||String(p.last_vision?.base_detector_provenance||'').includes('fixture');
@@ -117,15 +157,17 @@ const loopDetails=executionEvents.map(e=>e.detail).filter(d=>d&&typeof d==='obje
 const latestIteration=[...loopDetails].reverse().find(d=>Number.isInteger(d.iteration));
 const latestObservation=[...loopDetails].reverse().find(d=>d.phase==='observation');
 $('loop-status').textContent=`${latestIteration?'当前第 '+latestIteration.iteration+' 轮微调':'尚无闭环执行任务'} · 重新规划 ${flow.replans||0} 次`+(Number.isFinite(flow.controller_calls)?` · 累计 Jev ${flow.controller_calls} 次`:'');
+$('cycle-status').textContent=formatCycleStatus(flow);
+$('phase-progress').textContent=formatPhaseProgress(flow.outcome);
 $('loop-observation').textContent=latestObservation?'最近一次动作观察：'+formatLoopEvent(latestObservation)+'（这是该轮记录时的年龄，不能作为当前有效性保证）':'执行时将展示每轮观察、决策与动作反馈。';
 $('execution-events').replaceChildren();for(const event of executionEvents){const li=document.createElement('li');li.textContent=formatEventDetail(event.detail||{});$('execution-events').appendChild(li)}
 if(flow.outcome){const li=document.createElement('li');li.textContent=formatExecutionOutcome(flow.outcome);$('execution-events').appendChild(li)}
-$('execution-status').textContent=['executing','replanning'].includes(flow.state)?'闭环执行中：观察 → 决策 → 微调 → 再观察；尚未确认任务完成':flow.state==='completed'&&flow.outcome?.verified===true?'执行结果已通过验证（请核对模型来源）':executionEvents.length?'执行已停止或结束；未确认任务完成':'尚未执行任何任务动作';
+$('execution-status').textContent=flow.state==='replanning'?'动作已暂停，Qwen 正在复核新图像；复核通过后才继续，尚未完成任务':flow.state==='executing'?'闭环执行中：观察 → 决策 → 微调 → 再观察；尚未确认任务完成':flow.state==='completed'&&flow.outcome?.verified===true?'执行结果已通过验证（请核对模型来源）':executionEvents.length?'执行已停止或结束；未确认任务完成':'尚未执行任何任务动作';
 $('plan-preview').hidden=!preview;$('plan-preview').textContent=preview?JSON.stringify(preview,null,2):'';
 $('error').textContent=formatTaskError(s.error)}
 
 async function state(){try{render(await api('/api/state'))}catch(e){$('error').textContent=e.message}}
-async function frames(){if(document.hidden)return;try{const f=await api('/api/frames');for(const image of f.images){if(['left','right'].includes(image.camera_id)&&image.data_url.startsWith('data:image/'))$('camera-'+image.camera_id).src=image.data_url}$('frame-label').textContent='相机图像组 '+f.frame_id+' · 本地 RGB 预览（识别状态见下方）'}catch(e){$('error').textContent=e.message}}
+async function frames(){if(document.hidden)return;try{renderFrames(await api('/api/frames'))}catch(e){$('error').textContent=e.message}}
 async function control(action){if(mutation)return;mutation=true;$('reset').disabled=true;try{render(await api('/api/control',{action,seed:0}));if(action==='reset')await frames()}catch(e){$('error').textContent=e.message}finally{mutation=false;$('reset').disabled=false}}
 async function request(path,body){if(mutation)return;mutation=true;try{render(await api(path,body||{}))}catch(e){$('error').textContent=e.message}finally{mutation=false;await state()}}
 $('waypoint-red').onclick=()=>request('/api/waypoint',{object_id:'red'});$('waypoint-blue').onclick=()=>request('/api/waypoint',{object_id:'blue'});

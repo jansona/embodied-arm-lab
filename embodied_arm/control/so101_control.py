@@ -30,6 +30,7 @@ def robot_only(raw):
 class CameraSceneSource:
     def __init__(self,simulation,vision=None,clock=time.monotonic,refine_rgb=False,refinement_profile="baseline",roi_tracking=False):
         if refinement_profile not in ("baseline","scaled"):raise ValueError("Unknown refinement profile")
+        self.moving_wrist=getattr(simulation,'camera_profile','legacy_fixed_stereo')=='observer_wrist'
         self.refinement_profile=refinement_profile;self.roi_tracking=bool(roi_tracking);self.tracking_rois=None
         self.sim=simulation;self.vision=vision;self.clock=clock;self.refine_rgb=bool(refine_rgb)
         self.lock=threading.RLock();self.generation=0;self.scene=None;self.epoch=None;self.actions=None
@@ -91,13 +92,22 @@ class CameraSceneSource:
             self.pending=True;generation=self.generation;self.scene=None;self.reason='tracking' if tracking else 'observing'
         failure='rgb_tracking_rejected' if tracking else 'vision_request_failed'
         try:
+            if tracking and self.roi_tracking and self.moving_wrist:
+                from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
+                current=self.sim.camera_calibrations()
+                seeds=self.tracker.projected_seeds(current)
+                self.tracking_rois=bounds_from_detections(current,seeds,self.required_objects)
             packet=self.sim.capture_frames(roi_bounds=self.tracking_rois) if tracking and self.tracking_rois else self.sim.capture_frames()
+            if self.moving_wrist:
+                from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
+                validate_capture_geometry(packet)
+                if packet['calibrations']!=self.sim.camera_calibrations():raise ValueError('Capture calibration does not match paused encoders')
             vision_packet={k:packet[k] for k in ('frame_id','captured_at','images')}
             with self.lock:
                 if generation!=self.generation:raise ValueError('cancelled')
             if tracking:
-                if packet['calibrations']!=self.tracker_calibrations:raise ValueError('Camera calibration changed')
-                refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock())
+                if not self.moving_wrist and packet['calibrations']!=self.tracker_calibrations:raise ValueError('Camera calibration changed')
+                refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock(),**({'calibrations':packet['calibrations']} if self.moving_wrist else {}))
                 self._record_refinement(refined,tracking=True)
                 if not refined.accepted:raise ValueError('RGB tracking rejected')
                 detections=list(refined.detections)
@@ -124,9 +134,11 @@ class CameraSceneSource:
                 detections=list(result.detections)
                 if self.refine_rgb:
                     from embodied_arm.perception.rgb_region_tracker import RGBRegionTracker
-                    self.tracker=RGBRegionTracker() if self.refinement_profile=="baseline" else RGBRegionTracker(refinement_profile=self.refinement_profile)
+                    self.tracker=(RGBRegionTracker(refinement_profile=self.refinement_profile,moving_wrist=True) if self.moving_wrist
+                        else RGBRegionTracker() if self.refinement_profile=='baseline'
+                        else RGBRegionTracker(refinement_profile=self.refinement_profile))
                     failure='rgb_face_refinement_rejected'
-                    refined=self.tracker.start(vision_packet,detections,before['epoch'],now=self.clock(),required_objects=self.required_objects)
+                    refined=self.tracker.start(vision_packet,detections,before['epoch'],now=self.clock(),required_objects=self.required_objects,**({'calibrations':packet['calibrations']} if self.moving_wrist else {}))
                     self._record_refinement(refined,tracking=False)
                     if not refined.accepted:raise ValueError('RGB face refinement rejected')
                     self.tracker_calibrations=packet['calibrations'];self.semantic_deadline=packet['captured_at']+60.

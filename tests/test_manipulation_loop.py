@@ -79,3 +79,16 @@ def test_exact_simulator_experimental_factory_keeps_validation_truthful():
         state=TaskService(scene_source=source,brain=Brain(),executor=executor).status()
         assert state['execution_available'] and state['execution_validation']=='experimental_simulation'
     finally:sim.close()
+
+
+def test_applied_micro_history_is_retained_when_post_motion_perception_fails():
+    executor,observer,driver=fixture()
+    def failed_move(*args,**kwargs):
+        callback=kwargs['event_callback']
+        callback({'phase':'jev_decision','action':'x_plus','calls':1,'actions':0})
+        callback({'phase':'motion_applied','applied':True,'visually_verified':False,'calls':1,'actions':1})
+        return {'status':'stopped','reason':'perception_rejected','calls':1,'actions':1,'provenance':'offline_fixture'}
+    driver.move_to=failed_move
+    result=executor.execute(PLAN)
+    assert not result['verified'] and result['actions']==1
+    assert result['recent_actions']==[{'action':'x_plus','applied':True}]

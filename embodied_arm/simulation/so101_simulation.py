@@ -5,6 +5,7 @@ object contact IDs and evaluation scores are deliberately absent from both.
 """
 from __future__ import annotations
 import base64
+from copy import deepcopy
 from collections import deque
 from io import BytesIO
 import math
@@ -18,24 +19,16 @@ import pybullet_data
 
 WORKSPACE=((.07,.33),(-.19,.19),(.008,.33))
 CUBE_EDGE=.02
-CAMERAS={'left':((.08,-.46,.40),(.20,0,.035)),
-         'right':((.44,.30,.39),(.20,0,.035))}
-
-
-def camera_calibration(camera_id,width=640,height=480):
-    eye,target=map(lambda v:np.asarray(v,dtype=float),CAMERAS[camera_id])
-    forward=(target-eye)/np.linalg.norm(target-eye)
-    right=np.cross(forward,[0.,0.,1.]);right/=np.linalg.norm(right)
-    down=np.cross(forward,right)
-    matrix=np.eye(4);matrix[:3,:3]=np.column_stack((right,down,forward));matrix[:3,3]=eye
-    focal=height/(2*math.tan(math.radians(50)/2))
-    return {'camera_id':camera_id,'width':width,'height':height,'fx':focal,'fy':focal,
-            'cx':(width-1)/2,'cy':(height-1)/2,'world_from_camera':matrix.tolist()}
+from embodied_arm.simulation.camera_rig import (FIXED_VIEWS, PROFILES, TCP_FROM_WRIST_CAMERA,
+    WRIST_FOV_DEG, calibration as camera_calibration)
+CAMERAS=FIXED_VIEWS
 
 
 class SO101Simulation:
-    def __init__(self,seed=0,*,camera_size=(640,480),illumination_profile="standard"):
+    def __init__(self,seed=0,*,camera_size=(640,480),illumination_profile="standard",camera_profile="legacy_fixed_stereo"):
         if illumination_profile not in ("standard","shadow_free_rgb_v1"):raise ValueError("Unsupported illumination profile")
+        if camera_profile not in PROFILES:raise ValueError("Unsupported camera profile")
+        self.camera_profile=camera_profile
         self.illumination_profile=illumination_profile
         if tuple(camera_size) not in ((640,480),(1280,960),(1920,1440)):raise ValueError('Unsupported stereo resolution')
         self.camera_size=tuple(camera_size)
@@ -77,13 +70,26 @@ class SO101Simulation:
                         physics_steps=self.steps,status=self.status,error=self.error,origin=self.origin,
                         workspace=[list(x) for x in WORKSPACE],cube_edge_m=CUBE_EDGE)
             return safe
-    def _rgb(self,camera_id,roi=None,render_size=None):
-        eye,target=CAMERAS[camera_id];width,height=render_size or self.camera_size
-        view=p.computeViewMatrix(eye,target,[0,0,1]);proj=p.computeProjectionMatrixFOV(50,width/height,.01,2.)
+    def camera_calibrations(self,render_size=None):
+        """Snapshot intrinsic/extrinsic geometry from measured encoders and FK."""
+        with self.lock:
+            width,height=render_size or self.camera_size
+            wrist=self.robot.forward_kinematics(self.robot.joint_positions()) @ TCP_FROM_WRIST_CAMERA
+            return [camera_calibration(k,width,height,world_from_camera=wrist,fov=WRIST_FOV_DEG)
+                    if k=='right' and self.camera_profile=='observer_wrist'
+                    else camera_calibration(k,width,height) for k in CAMERAS]
+
+    def _rgb(self,camera_id,roi=None,render_size=None,calibration=None):
+        width,height=render_size or self.camera_size
+        calibration=calibration or next(c for c in self.camera_calibrations((width,height)) if c['camera_id']==camera_id)
+        pose=np.asarray(calibration['world_from_camera']);eye=pose[:3,3]
+        view=p.computeViewMatrix(eye,eye+pose[:3,2],-pose[:3,1])
+        fov=math.degrees(2*math.atan(height/(2*calibration['fy'])))
+        proj=p.computeProjectionMatrixFOV(fov,width/height,.01,2.)
         native_width,native_height=width,height
         if roi is not None:
             from embodied_arm.perception.rgb_roi_geometry import frustum
-            proj=p.computeProjectionMatrix(*frustum(roi,width,height));width=roi[2]-roi[0];height=roi[3]-roi[1]
+            proj=p.computeProjectionMatrix(*frustum(roi,width,height,fov=fov));width=roi[2]-roi[0];height=roi[3]-roi[1]
         pixels=self.call(p.getCameraImage,width,height,viewMatrix=view,projectionMatrix=proj,
                          renderer=p.ER_TINY_RENDERER,flags=p.ER_NO_SEGMENTATION_MASK,shadow=int(self.illumination_profile=="standard"))[2]
         rgb=np.asarray(pixels,dtype=np.uint8).reshape(height,width,4)[:,:,:3]
@@ -99,13 +105,19 @@ class SO101Simulation:
             if roi_bounds is not None and render_size is not None:raise ValueError('ROI uses native calibration')
             if roi_bounds is not None and set(roi_bounds)!=set(CAMERAS):raise ValueError('Both stereo crop bounds required')
             frame_id=uuid.uuid4().hex;captured_at=time.monotonic();images=[]
+            calibrations=self.camera_calibrations(size)
             for camera_id in CAMERAS:
-                jpeg=self._rgb(camera_id,None if roi_bounds is None else roi_bounds[camera_id],render_size=size)
+                jpeg=self._rgb(camera_id,None if roi_bounds is None else roi_bounds[camera_id],render_size=size,calibration=next(c for c in calibrations if c['camera_id']==camera_id))
                 images.append({'camera_id':camera_id,'width':size[0],'height':size[1],
                                'data_url':'data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii')})
                 if roi_bounds is None:self._renders[camera_id]=(time.monotonic(),jpeg)
             packet={'frame_id':frame_id,'captured_at':captured_at,'images':images,
-                    'calibrations':[camera_calibration(k,*size) for k in CAMERAS]}
+                    'calibrations':calibrations,
+                    'camera_profile':self.camera_profile,
+                    'view_metadata':[{'camera_id':c['camera_id'],'frame_id':frame_id,'captured_at':captured_at,
+                        'role':'wrist' if self.camera_profile=='observer_wrist' and c['camera_id']=='right' else 'observer',
+                        'extrinsics_source':'joint_encoder_fk_rigid_mount' if self.camera_profile=='observer_wrist' and c['camera_id']=='right' else 'fixed_calibration',
+                        'calibration':deepcopy(c)} for c in calibrations]}
             if roi_bounds is not None:packet.update(capture_profile='native_coordinate_roi_canvas',observed_roi_bounds=roi_bounds)
             return packet
     def capture_preview_frames(self):

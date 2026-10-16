@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import stat
 import time
+from embodied_arm.providers.request_telemetry import worker_telemetry, request_audit_fields
 
 from embodied_arm.runtime.ipc import number
 from embodied_arm.providers.vision_adapter import VisionResult, sanitize_diagnostic
@@ -24,6 +25,7 @@ def _invoke(adapter, packet, connection, inherited_fds):
             pass
     try:
         try:
+            if hasattr(adapter, 'last_request'): adapter.last_request = None
             result = adapter.perceive(packet)
         except BaseException:
             result = failure('adapter_error', packet)
@@ -43,9 +45,10 @@ def _invoke(adapter, packet, connection, inherited_fds):
             safe = validate_result(result.to_dict(), packet).to_dict()
         except (ValueError, TypeError, RecursionError):
             safe = failure('invalid_response', packet).to_dict()
-        raw = json.dumps(safe, allow_nan=False, separators=(',', ':')).encode()
+        telemetry = worker_telemetry(getattr(adapter, 'last_request', None), 'vision')
+        raw = json.dumps({'result': safe, 'telemetry': telemetry}, allow_nan=False, separators=(',', ':')).encode()
         if len(raw) > MAX_RESULT_BYTES:
-            raw = json.dumps(failure('invalid_response', packet).to_dict()).encode()
+            raw = json.dumps({'result': failure('invalid_response', packet).to_dict(), 'telemetry': None}).encode()
         connection.send_bytes(raw)
     except (OSError, ValueError, TypeError):
         pass
@@ -136,6 +139,7 @@ def worker_run(adapter, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                     args=(adapter, packet, send, (store.fd, lock_fd, receive.fileno())),
                     daemon=False, name='bounded-rgb-vision-call')
                 result = None
+                telemetry = None
                 cancelled = False
                 call_started = time.monotonic()
                 try:
@@ -155,7 +159,11 @@ def worker_run(adapter, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                             break
                         if receive.poll(min(POLL_SECONDS, max(0, deadline - time.monotonic()))):
                             try:
-                                result = validate_result(_loads(receive.recv_bytes(MAX_RESULT_BYTES)), packet)
+                                envelope = _loads(receive.recv_bytes(MAX_RESULT_BYTES))
+                                if not isinstance(envelope, dict) or set(envelope) != {'result', 'telemetry'}:
+                                    raise ValueError('Invalid vision helper envelope')
+                                result = validate_result(envelope['result'], packet)
+                                telemetry = worker_telemetry(envelope['telemetry'], 'vision')
                             except (EOFError, OSError, ValueError, TypeError, RecursionError):
                                 result = failure('invalid_response', packet)
                             break
@@ -188,6 +196,7 @@ def worker_run(adapter, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                 delivered = not cancelled and time.time() < data['expires_at']
                 # No images, pixels, object geometry, raw errors or credentials.
                 audit.append({'id': job, 'frame_sha256': data['frame_sha256'], 'accepted': safe['accepted'],
+                              **request_audit_fields(telemetry, 'vision'),
                               'reason': safe['reason'], 'calls': counters['calls'],
                               'detection_count': len(safe['detections']),
                               'latency_seconds': round(time.monotonic() - call_started, 4), 'delivered': delivered})

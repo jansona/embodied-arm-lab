@@ -18,6 +18,7 @@ import threading
 import time
 
 import httpx
+from embodied_arm.providers.request_telemetry import RequestTelemetry
 from PIL import Image
 
 from embodied_arm.providers.brain import ENDPOINT, MODEL, _loads
@@ -356,6 +357,7 @@ class QwenVision:
         if type(use_environment_network) is not bool:
             raise ValueError('Network flag must be boolean')
         self._api_key, self._transport = api_key, transport
+        self.last_request = None
         self.timeout, self.max_calls, self.max_frame_age = timeout, max_calls, max_frame_age
         self.min_confidence, self.max_uncertainty_px = min_confidence, max_uncertainty_px
         self.use_environment_network = use_environment_network
@@ -377,9 +379,11 @@ class QwenVision:
             self._lock.release()
 
     def _perceive(self, frame):
+        telemetry = None
         safe = None
         self.last_diagnostic = sanitize_diagnostic({'stage': 'input', 'error': 'none'})
         def fail(reason, code=None):
+            if telemetry is not None: telemetry.finish(reason)
             self.last_diagnostic = sanitize_diagnostic({**self.last_diagnostic,
                 'error': code or ('http_error' if reason.startswith('http_error_') else reason)})
             return VisionResult(reason=reason, calls=self.calls,
@@ -393,12 +397,14 @@ class QwenVision:
             return fail('call_budget_exhausted')
         self.calls += 1
         started = time.monotonic()
+        telemetry = RequestTelemetry(self, 'vision')
         self.last_diagnostic['stage'] = 'request'
         try:
             with httpx.Client(timeout=httpx.Timeout(self.timeout), follow_redirects=False,
                               trust_env=self.use_environment_network, transport=self._transport) as client:
                 with client.stream('POST', ENDPOINT, headers={'Authorization': 'Bearer ' + self._api_key,
                                                             'Accept': 'application/json'}, json=body) as response:
+                    telemetry.response(response)
                     self.last_diagnostic.update(stage='http', http_status=response.status_code)
                     if response.status_code != 200:
                         return fail('http_error_' + str(response.status_code))
@@ -415,6 +421,7 @@ class QwenVision:
                 return fail('stale_frame')
             self.last_diagnostic['stage'] = 'response_json'
             payload = _loads(raw)
+            telemetry.payload(payload)
             self.last_diagnostic.update(stage='envelope', response=_response_shape(payload, 'response'))
             if not isinstance(payload, dict) or payload.get('model', MODEL) != MODEL:
                 return fail('unexpected_model')
@@ -447,6 +454,7 @@ class QwenVision:
             if any(d.confidence < self.min_confidence for d in detections):
                 return fail('low_confidence')
             self.last_diagnostic = sanitize_diagnostic({**self.last_diagnostic, 'stage': 'complete', 'error': 'none'})
+            telemetry.finish('accepted')
             return VisionResult(True, 'accepted', safe['frame_id'], safe['captured_at'], detections, calls=self.calls)
         except httpx.TimeoutException:
             return fail('timeout')

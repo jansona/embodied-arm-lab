@@ -24,6 +24,7 @@ from embodied_arm.runtime.ipc import MAX_BYTES, Store, number
 
 BRAIN_IPC_ROOT = RUNTIME_ROOT / 'brain-ipc'
 MAX_CALLS = 10
+MAX_REPLANS = 8
 MAX_SECONDS = 600
 REQUEST_SECONDS = 45
 POLL_SECONDS = .02
@@ -155,9 +156,11 @@ def worker_status():
             return safe
         calls, limit, deadline = data.get('calls'), data.get('max_calls'), data.get('deadline_unix')
         replans = data.get('replans', 0)
+        max_replans=data.get('max_replans',1)
         if (type(calls) is not int or type(limit) is not int
                 or not 0 <= calls <= limit <= MAX_CALLS or not number(deadline)
-                or type(replans) is not int or not 0 <= replans <= 1):
+                or type(max_replans) is not int or not 0 <= max_replans <= MAX_REPLANS
+                or type(replans) is not int or not 0 <= replans <= max_replans):
             return safe
         remaining = deadline - time.time()
         if not 0 < remaining <= MAX_SECONDS + .5 or (calls >= limit and data['status'] != 'calling'):
@@ -165,7 +168,7 @@ def worker_status():
         return {**safe, 'configured': True, 'available': True, 'status': data['status'],
                 'busy': data['status'] == 'calling', 'calls': calls, 'max_calls': limit,
                 'remaining_calls': limit - calls, 'remaining_seconds': round(remaining, 2),
-                'replans': replans, 'remaining_replans': 1 - replans}
+                'replans': replans, 'max_replans':max_replans, 'remaining_replans': max_replans - replans}
     except (OSError, ValueError, TypeError, RecursionError):
         return safe
     finally:
@@ -178,7 +181,9 @@ def worker_status():
 class FileBrainBridge:
     """Synchronous brain API with cancellation and per-instance stale guards."""
 
-    def __init__(self):
+    def __init__(self, max_replans=1):
+        if type(max_replans) is not int or not 0<=max_replans<=MAX_REPLANS:raise ValueError("Invalid replan budget")
+        self.max_replans=max_replans
         self._lock = threading.RLock()
         self._call_lock = threading.Lock()
         self._pending = set()
@@ -210,7 +215,7 @@ class FileBrainBridge:
         return self._call(text, scene, history)
 
     def replan(self, text, scene, previous_plan, feedback, history=None):
-        """One explicit repair for this bridge, sharing the worker call budget."""
+        """A bounded explicit review for this bridge, sharing the worker call budget."""
         return self._call(text, scene, history, replan=True,
                           previous_plan=previous_plan, feedback=feedback)
 
@@ -239,7 +244,7 @@ class FileBrainBridge:
         with self._lock:
             if epoch != self._epoch:
                 return BrainResult(reason='cancelled')
-            if replan and self._replans >= 1:
+            if replan and self._replans >= self.max_replans:
                 return BrainResult(reason='replan_budget_exhausted')
         status = worker_status()
         if not status['available']:

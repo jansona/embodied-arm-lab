@@ -50,7 +50,8 @@ class SO101Session:
         from embodied_arm.services.task_service import TaskService
         if task_executor is not None and task_executor_factory is not None:raise ValueError('Choose one task executor injection')
         if task_executor_factory is not None:task_executor=task_executor_factory(sim,self.source,controller)
-        self.task_service=TaskService(scene_source=self.source,brain=brain,executor=task_executor)
+        self.task_service=TaskService(scene_source=self.source,brain=brain,executor=task_executor,
+            max_controller_calls=200,max_seconds=420,cycle_max_calls=16,max_cycle_reviews=8)
     def _pending(self):
         return bool((self.worker and self.worker.is_alive()) or self.task_service.status()['pending'])
     def _controller_status(self):
@@ -194,7 +195,7 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
         factory=sim_factory
         if factory is None:
             from embodied_arm.simulation.so101_simulation import SO101Simulation
-            factory=(lambda seed: SO101Simulation(seed=seed,camera_size=(1920,1440),illumination_profile="shadow_free_rgb_v1")) if enable_simulation_tasks else SO101Simulation
+            factory=(lambda seed: SO101Simulation(seed=seed,camera_size=(1920,1440),illumination_profile="shadow_free_rgb_v1",camera_profile="observer_wrist")) if enable_simulation_tasks else (lambda seed: SO101Simulation(seed=seed,camera_profile="observer_wrist"))
         vision_client=vision;brain_client=brain;controller_client=controller
         if sim_factory is None:
             if controller_client is None:
@@ -205,7 +206,7 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
                 vision_client=FileVisionBridge()
             if brain_client is None:
                 from embodied_arm.runtime.brain_ipc import FileBrainBridge
-                brain_client=FileBrainBridge()
+                brain_client=FileBrainBridge(max_replans=8)
         selected_executor_factory=task_executor_factory
         selected_source_factory=source_factory
         if enable_simulation_tasks:

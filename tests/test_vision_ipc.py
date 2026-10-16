@@ -437,7 +437,7 @@ class VisionIPCTests(unittest.TestCase):
         self.assertTrue(validate_result(result, frame).accepted)
         for changes in ({'frame_id': 'different'}, {'captured_at': frame['captured_at'] + .001},
                         {'model': 'other'}, {'provenance': 'synthetic'}, {'calls': True},
-                        {'calls': 7}, {'world_xyz': []}, {'reason': 'SECRET'}, {'accepted': False}):
+                        {'calls': 11}, {'world_xyz': []}, {'reason': 'SECRET'}, {'accepted': False}):
             with self.assertRaises(ValueError):
                 validate_result({**result, **changes}, frame)
         for changes in ({'frame_id': 'other'}, {'uv': [400, 100]}, {'pixel_sigma_px': 1},
@@ -512,13 +512,13 @@ class VisionIPCTests(unittest.TestCase):
             worker_run(adapter, max_seconds=.01)
         worker.join(1)
         self.assertFalse(worker_status()['available'])
-        for args in ({'max_calls': 0}, {'max_calls': 7}, {'max_calls': True},
+        for args in ({'max_calls': 0}, {'max_calls': 11}, {'max_calls': True},
                      {'max_seconds': 601}, {'max_seconds': 0}, {'max_seconds': float('inf')}):
             with self.assertRaises(ValueError):
                 worker_run(FakeVision(), **args)
         with patch.object(QwenVision, 'from_config', create=True, side_effect=AssertionError('No config load')):
             with self.assertRaises(SystemExit):
-                main(['--config', '/never-read-config', '--max-calls', '7'])
+                main(['--config', '/never-read-config', '--max-calls', '11'])
 
     def test_transient_status_probe_does_not_block_worker_startup(self):
         store = VisionStore()

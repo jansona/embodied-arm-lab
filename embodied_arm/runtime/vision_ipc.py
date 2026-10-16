@@ -25,7 +25,7 @@ from embodied_arm.providers.vision_adapter import VisionResult, frame_snapshot, 
 VISION_IPC_ROOT = RUNTIME_ROOT / 'vision-ipc'
 MAX_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 16384
-MAX_CALLS = 6
+MAX_CALLS = 10
 MAX_SECONDS = 600
 MAX_FRAME_AGE = 60
 REQUEST_SECONDS = 45

@@ -104,7 +104,8 @@ def test_closed_loop_events_do_not_confuse_decisions_or_waypoints_with_task_succ
     values=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify('+json.dumps(details)+'.map(formatEventDetail)));'],text=True))
     assert '第 2 轮' in values[0] and '0.20 秒' in values[0] and 'L2 / R2' in values[0]
     assert '不代表动作已执行或任务完成' in values[1] and 'fake_test' in values[1]
-    assert '等待新图像反馈' in values[2]
+    assert '局部微动作结束并收到新图像反馈' in values[2]
+    assert '不代表整个任务完成' in values[2] and '任务成功' not in values[2]
     assert '未应用该决策' in values[3]
     assert '整个任务尚需独立图像验证' in values[4]
     assert '重新规划' in values[5] and '未通过图像验证' in values[5]
@@ -160,3 +161,60 @@ def test_validated_goal_id_has_green_target_semantics():
     steps=[{'action':'place','object_id':'red','target_id':'goal'},{'action':'pick','object_id':'red','target_id':'goal'}]
     values=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify('+json.dumps(steps)+'.map(formatPlanStep)));'],text=True))
     assert all('绿色目标区域' in value for value in values)
+
+
+def test_camera_roles_and_fov_come_from_metadata_and_actual_images():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    packet={'frame_id':'frame-9','camera_profile':'observer_wrist','images':[{'camera_id':'left','data_url':'data:image/jpeg;base64,observer'},{'camera_id':'right','data_url':'data:image/jpeg;base64,wrist'}],'view_metadata':[{'camera_id':'left','role':'observer','extrinsics_source':'fixed_calibration','calibration':{'height':480,'fy':514.682}},{'camera_id':'right','role':'wrist','extrinsics_source':'joint_encoder_fk_rigid_mount','calibration':{'height':480,'fy':219.918}}]}
+    dom="const elements={};const $=id=>elements[id]||(elements[id]={});"
+    script=dom+helper+'\nrenderFrames('+json.dumps(packet)+');console.log(JSON.stringify(elements));'
+    values=json.loads(subprocess.check_output(['node','-e',script],text=True))
+    assert '固定观察相机' in values['camera-left-caption']['textContent'] and '50.0°' in values['camera-left-caption']['textContent']
+    assert '腕部相机' in values['camera-right-caption']['textContent'] and '95.0°' in values['camera-right-caption']['textContent']
+    assert '编码器位姿' in values['camera-right-caption']['textContent']
+    assert values['camera-right']['src'].endswith('wrist') and values['camera-left']['src'].endswith('observer')
+    packet['view_metadata']=[];packet.pop('camera_profile')
+    script=dom+helper+'\nrenderFrames('+json.dumps(packet)+');console.log(JSON.stringify(elements));'
+    values=json.loads(subprocess.check_output(['node','-e',script],text=True))
+    assert '角色未提供' in values['camera-right-caption']['textContent']
+    assert '95' not in values['camera-right-caption']['textContent']
+
+
+def test_cycle_cap_review_and_phase_progress_are_measured_not_invented():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    code=helper+'''\nconsole.log(JSON.stringify([
+      formatCycleStatus({cycle_index:0,cycle_reviews:0,cycle_max_calls:16,controller_calls:16,max_controller_calls:200}),
+      formatCycleStatus({}),
+      formatPhaseProgress({completed_step_ids:['s1'],active_step_id:'s2',active_step:{action:'place',object_id:'red',target_id:'goal'},phase:'release'}),
+      formatLoopEvent({attempt:1,reason:'cycle_budget'}),
+      formatExecutionOutcome({status:'yielded',reason:'cycle_budget',calls:16,actions:12})
+    ]));'''
+    values=json.loads(subprocess.check_output(['node','-e',code],text=True))
+    assert '每周期最多 16 次 Jev' in values[0] and '剩余 184 次' in values[0]
+    assert '尚未提供' in values[1] and '200' not in values[1]
+    assert 's1' in values[2] and 's2' in values[2] and '释放' in values[2] and '绿色目标区域' in values[2]
+    assert '微动作已暂停' in values[3] and '复核通过后才继续' in values[3]
+    assert '周期暂停原因' in values[4] and '已应用 12 步' in values[4]
+
+
+def test_roundtrips_are_actual_optional_end_to_end_measurements():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    code=helper+"\nconsole.log(JSON.stringify([formatCycleStatus({brain_roundtrip_seconds:1.234}),formatLoopEvent({phase:'jev_decision',accepted:true,decision_roundtrip_seconds:.456}),formatRoundtrip('Qwen',null),formatRoundtrip('Qwen',-1),formatTaskError('cycle_review_budget'),formatTaskError('planner_stopped_cycle')]));"
+    values=json.loads(subprocess.check_output(['node','-e',code],text=True))
+    assert 'Qwen 请求往返 1.23 秒' in values[0] and '含 IPC、网络及服务处理' in values[0]
+    assert 'Jev 请求往返 0.46 秒' in values[1]
+    assert values[2]==values[3]==''
+    assert '预算已用完' in values[4] and '决定停止' in values[5]
+    assert all('Hz' not in v and '推理耗时' not in v for v in values)
+
+
+def test_applied_command_does_not_imply_settled_or_visually_verified():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    detail={'phase':'motion_applied','iteration':2,'applied':True,'visually_verified':False,'actions':3}
+    value=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify(formatLoopEvent('+json.dumps(detail)+')));'],text=True))
+    assert '指令已施加，运动与视觉结果待确认' in value
+    assert '已应用 3 步' in value and '成功' not in value and '已验证' not in value

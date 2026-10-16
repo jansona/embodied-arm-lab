@@ -335,8 +335,9 @@ class DynamicRGBPhaseTracker:
     failure invalidates this tracker; caller may acquire ONE semantic refresh
     through VisualPhaseVerifier without changing its original phase identity.
     """
-    def __init__(self, *, profile='baseline', max_residual_px=12., semantic_lifetime_s=30.):
+    def __init__(self, *, profile='baseline', max_residual_px=12., semantic_lifetime_s=30., moving_wrist=False):
         if not 0 < semantic_lifetime_s <= 120:raise ValueError('Invalid bounded semantic lease')
+        self.moving_wrist=bool(moving_wrist)
         self.semantic_lifetime_s=float(semantic_lifetime_s)
         if profile not in ('baseline', 'scaled'):
             raise ValueError('Unknown refinement profile')
@@ -355,6 +356,14 @@ class DynamicRGBPhaseTracker:
         return refine_rgb_landmark(base64.b64decode(frame.jpeg_base64), object_id=object_id,
             uv_1000=[uv[0]/(c.width-1)*1000, uv[1]/(c.height-1)*1000],
             confidence=confidence, width=c.width, height=c.height)
+
+    def _area_ratio(self,frame,area,predicted):
+        ratio=area/self._areas[frame.camera_id]
+        if self.moving_wrist:
+            from embodied_arm.perception.moving_camera_geometry import projected_face_area
+            try:ratio*=projected_face_area(self._calibrations[frame.camera_id],self._xyz)/projected_face_area(frame.calibration,predicted)
+            except ValueError:return float('inf')
+        return ratio
 
     def start(self, observation: VisualObservation, frames, *, object_id: str, now: float):
         from embodied_arm.perception.camera_perception import RGBFrame
@@ -401,7 +410,8 @@ class DynamicRGBPhaseTracker:
         predicted = self._xyz + _vec(tcp_xyz) - _vec(self._base.tcp_xyz)
         detections = []
         for f in frames:
-            if f.calibration != self._calibrations[f.camera_id]:
+            from embodied_arm.perception.moving_camera_geometry import compatible_calibrations
+            if not compatible_calibrations({f.camera_id:self._calibrations[f.camera_id]}, {f.camera_id:f.calibration}, moving_wrist=self.moving_wrist):
                 return fail('camera_calibration_changed')
             try:
                 seed = f.calibration.project(tuple(float(x) for x in predicted))
@@ -411,7 +421,7 @@ class DynamicRGBPhaseTracker:
             if not result.accepted:
                 return fail('local_face_lost:' + result.reason)
             if (math.dist(result.uv, seed) + 3*result.pixel_sigma_px > self.max_residual_px
-                    or not .5 <= result.face_area_px2/self._areas[f.camera_id] <= 2):
+                    or not .5 <= self._area_ratio(f,result.face_area_px2,predicted) <= 2):
                 return fail('dynamic_identity_or_prediction_mismatch')
             detections.append(PixelDetection(self._object, f.camera_id, f.frame_id,
                 result.uv, self._base.association_confidence, result.pixel_sigma_px))
@@ -455,7 +465,8 @@ class DynamicRGBPhaseTracker:
             return fail('closure_tcp_moved')
         detections = []
         for frame in frames:
-            if frame.calibration != self._calibrations[frame.camera_id]:
+            from embodied_arm.perception.moving_camera_geometry import compatible_calibrations
+            if not compatible_calibrations({frame.camera_id:self._calibrations[frame.camera_id]}, {frame.camera_id:frame.calibration}, moving_wrist=self.moving_wrist):
                 return fail('camera_calibration_changed')
             try:
                 seed = frame.calibration.project(tuple(float(x) for x in self._xyz))
@@ -464,7 +475,7 @@ class DynamicRGBPhaseTracker:
                 return fail('closure_prediction_outside_image')
             if not face.accepted:
                 return fail('closure_face_lost:' + face.reason)
-            if not .5 <= face.face_area_px2/self._areas[frame.camera_id] <= 2:
+            if not .5 <= self._area_ratio(frame,face.face_area_px2,self._xyz) <= 2:
                 return fail('closure_face_identity_mismatch')
             detections.append(PixelDetection(self._object,frame.camera_id,frame.frame_id,
                 face.uv,self._base.association_confidence,face.pixel_sigma_px))

@@ -32,6 +32,24 @@ class CameraSampler:
             capture=getattr(self.sim,'capture_preview_frames',self.sim.capture_frames)
             packet=capture()
             pair={key:packet[key] for key in ('frame_id','captured_at','images')}
+            # UI camera geometry is local robot calibration, never scene/oracle data.
+            # Provider requests separately retain the strict image-only contract.
+            pair['images']=[{k:i[k] for k in ('camera_id','width','height','data_url') if k in i}
+                            for i in packet['images']]
+            if 'camera_profile' in packet:
+                if packet['camera_profile'] not in ('legacy_fixed_stereo','observer_wrist'):
+                    raise ValueError('invalid_camera_profile')
+                pair['camera_profile']=packet['camera_profile']
+            from embodied_arm.perception.camera_perception import CameraCalibration
+            if 'camera_profile' in pair and 'calibrations' in packet:
+                pair['calibrations']=[CameraCalibration.from_dict(c).to_dict() for c in packet['calibrations']]
+            if 'camera_profile' in pair and 'view_metadata' in packet:
+                pair['view_metadata']=[{k:m[k] for k in ('camera_id','frame_id','captured_at','role','extrinsics_source')}
+                    | {'calibration':CameraCalibration.from_dict(m['calibration']).to_dict()}
+                    for m in packet['view_metadata']]
+            if pair.get('camera_profile')=='observer_wrist':
+                from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
+                validate_capture_geometry(pair)
             images=pair['images']
             if (len(images)!=2 or {x['camera_id'] for x in images}!={'left','right'}
                     or any(not x['data_url'].startswith('data:image/jpeg;base64,') for x in images)):

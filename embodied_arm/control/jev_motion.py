@@ -22,14 +22,14 @@ class JevMotionDriver:
 
     def move_to(self, target_xyz, covariance_m2, *, cancel_event=None,
                 max_calls=48, deadline=None, event_callback=None,
-                before_decision=None, after_motion=None, target_update=None):
+                before_decision=None, after_motion=None, target_update=None, yield_on_budget=False):
         return self._run('cartesian', target_xyz, covariance_m2, cancel_event,
-                         max_calls, deadline, event_callback, before_decision, after_motion, target_update)
+                         max_calls, deadline, event_callback, before_decision, after_motion, target_update, yield_on_budget)
 
     def gripper(self, target_openness, *, cancel_event=None, max_calls=1,
-                deadline=None, event_callback=None, before_decision=None, after_motion=None):
+                deadline=None, event_callback=None, before_decision=None, after_motion=None, yield_on_budget=False):
         return self._run('gripper', target_openness, None, cancel_event,
-                         max_calls, deadline, event_callback, before_decision, after_motion)
+                         max_calls, deadline, event_callback, before_decision, after_motion, yield_on_budget=yield_on_budget)
 
     def _check(self, cancel, deadline):
         if cancel is not None and cancel.is_set():
@@ -51,7 +51,7 @@ class JevMotionDriver:
                 or abs(after['gripper_openness']-before['gripper_openness']) > .01):
             raise ValueError('robot_changed_during_decision')
 
-    def _actuate(self, action, values, cancel, deadline, result):
+    def _actuate(self, action, values, cancel, deadline, result, on_applied=None):
         self._check(cancel, deadline)
         before = self.sim.proprioception()
         self.sim.resume()
@@ -59,6 +59,7 @@ class JevMotionDriver:
         origin='offline_fixture' if any(tag in source.lower() for tag in ('fake','fixture','mock','offline')) else 'jev'
         self.sim.manual(action, values, origin=origin)
         result['actions'] += 1
+        if on_applied:on_applied()
         motion_deadline = min(deadline, self.clock()+5.)
         while self.sim.proprioception()['busy']:
             self._check(cancel, deadline)
@@ -81,7 +82,7 @@ class JevMotionDriver:
         except Exception:
             raise ValueError('perception_rejected') from None
 
-    def _run(self, kind, target, covariance, cancel, max_calls, deadline, callback, before_decision, after_motion, target_update=None):
+    def _run(self, kind, target, covariance, cancel, max_calls, deadline, callback, before_decision, after_motion, target_update=None, yield_on_budget=False):
         result = {'status':'stopped', 'reason':'unavailable', 'calls':0, 'actions':0,
                   'controller':'jev', 'provenance':getattr(self.controller, 'provenance', 'unverified'),
                   'source':'caller_rgb_target', 'grasp_verified':False,
@@ -165,13 +166,16 @@ class JevMotionDriver:
                 self._unchanged(robot)
                 observation = build_observation(local,robot,axis)
                 result['calls'] += 1
+                decision_started=self.clock()
                 raw = self.controller.decide(observation)
+                decision_roundtrip_seconds=max(0.,self.clock()-decision_started)
                 decision = validate_decision(raw.to_dict() if hasattr(raw,'to_dict') else raw, observation)
                 self._check(cancel,deadline)
                 if callback:
                     callback({'phase':'jev_decision','iteration':iteration,'kind':kind,'axis_index':axis,
                               'accepted':decision.accepted,'action':decision.action,
                               'confidence':decision.confidence,'provenance':result['provenance'],
+                              'decision_roundtrip_seconds':decision_roundtrip_seconds,
                               'calls':result['calls'],'actions':result['actions']})
                 self._check(cancel,deadline)
                 self._unchanged(robot)
@@ -185,6 +189,9 @@ class JevMotionDriver:
                         result.update(status='completed',reason='encoder_within_tolerance')
                         return result
                     continue
+                def applied_event():
+                    if callback:callback({'phase':'motion_applied','iteration':iteration,'kind':kind,
+                        'actions':result['actions'],'calls':result['calls'],'applied':True,'visually_verified':False})
                 if kind == 'cartesian':
                     sign = 1 if decision.action.endswith('_plus') else -1
                     xyz = list(robot['ee'])
@@ -201,9 +208,9 @@ class JevMotionDriver:
                     xyz[axis] += sign*step
                     if math.dist(xyz,robot['ee']) > .008000001:
                         raise ValueError('unsafe_step')
-                    self._actuate('xyz',xyz,cancel,deadline,result)
+                    self._actuate('xyz',xyz,cancel,deadline,result,applied_event)
                 else:
-                    self._actuate(decision.action,None,cancel,deadline,result)
+                    self._actuate(decision.action,None,cancel,deadline,result,applied_event)
                 if after_motion:
                     self._perception_callback(after_motion)
                 if callback:
@@ -219,6 +226,10 @@ class JevMotionDriver:
                        'robot_changed_during_decision','robot_changed_during_motion','invalid_budget','invalid_target',
                        'invalid_covariance','invalid_target_update','target_outside_workspace','uncertainty_unresolved',
                        'call_budget_exhausted','controller_rejected','unsafe_step','perception_rejected','precision_floor'}
+            if str(exc)=='call_budget_exhausted' and yield_on_budget and not (cancel and cancel.is_set()) and self.clock()<deadline:
+                self.sim.pause_idle()
+                result.update(status='yielded',reason='cycle_budget')
+                return result
             result['status'] = 'stopped'
             result['reason'] = str(exc) if str(exc) in allowed else 'motion_or_controller_error'
             self.sim.stop()

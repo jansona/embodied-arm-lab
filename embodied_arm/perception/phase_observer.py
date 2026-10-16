@@ -8,7 +8,7 @@ import base64
 from dataclasses import asdict, replace
 import time
 import uuid
-from embodied_arm.perception.camera_perception import CameraCalibration, RGBFrame, EstimatedScene, estimate_scene, PerceptionConfig
+from embodied_arm.perception.camera_perception import CameraCalibration, RGBFrame, EstimatedScene, estimate_scene, PerceptionConfig, PixelDetection
 from embodied_arm.perception.rgb_region_tracker import RGBRegionTracker
 from embodied_arm.control.so101_control import robot_only, OBSERVATION_VOLUME
 from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker, VisualObservation, VerificationConfig, verify_lift, verify_release
@@ -17,6 +17,7 @@ class PhaseSceneObserver:
     validated = False
 
     def __init__(self, source, *, clock=time.monotonic):
+        self.moving_wrist=getattr(source.sim,"camera_profile","legacy_fixed_stereo")=="observer_wrist"
         self.source = source
         self.sim = source.sim
         self.clock = clock
@@ -38,6 +39,43 @@ class PhaseSceneObserver:
         if action not in ('pick','place'):raise ValueError('Unsupported phase task')
         self.task_action=action
         self.required_objects=('red','blue')
+
+    def export_step_evidence(self):
+        """Fresh local RGB handoff; never reuses the source's pre-pick anchors."""
+        return self.snapshot(),self.frames,self.detections
+
+    def begin_step(self,action,object_id,target_id=None,held_evidence=None):
+        if action not in ('pick','place') or object_id not in ('red','blue'):
+            raise ValueError('Unsupported step')
+        if target_id in ('on:red','on:blue'):target_id=target_id.split(':',1)[1]
+        if target_id not in (None,'goal','red','blue') or target_id==object_id:
+            raise ValueError('Invalid placement support')
+        if action=='place':
+            keys={'object_id','epoch','actions','frame_ids','identity_token','verified_lift','source'}
+            if (not isinstance(held_evidence,dict) or set(held_evidence)!=keys
+                    or held_evidence['object_id']!=object_id or held_evidence['verified_lift'] is not True
+                    or held_evidence['source']!='phase_scoped_temporal_rgb' or self.latest is None
+                    or held_evidence['identity_token']!=self.identity_token
+                    or held_evidence['epoch']!=self.latest['robot']['epoch']
+                    or held_evidence['actions']!=self.latest['robot']['actions']
+                    or held_evidence['frame_ids']!=self.latest['scene']['frame_ids']):
+                raise ValueError('Verified held RGB handoff required')
+        if self.latest is None:
+            self.configure_task(action)
+            return self.begin_phase('approach',object_id)
+        # Mandatory newly captured RGB before transferring identity between steps.
+        self.observe()
+        scene=EstimatedScene.from_dict(self.latest['scene'])
+        for name in self.required_objects:scene.require(name,now=self.clock())
+        self.configure_task(action)
+        if self.object_id!=object_id:
+            self.object_id=object_id;self.identity_token=uuid.uuid4().hex
+        self.phase_id=uuid.uuid4().hex;self.dynamic=None;self.closure_action=None
+        self.latest=self._evidence(self.latest,self.detections,'dynamic_rgb_track')
+        self._start_static(self.required_objects)
+        if action=='place' and target_id in (None,'goal') and self.goal_memory is None:
+            raise ValueError('No RGB-observed goal memory')
+        return self.begin_phase('approach',object_id)
 
     @staticmethod
     def _packet(frames):
@@ -62,18 +100,19 @@ class PhaseSceneObserver:
             self.frames = frames
             self.detections = detections
             self.latest = self._evidence(snapshot, detections, 'dynamic_rgb_track')
-            self._start_static(self.required_objects)
-            if self.task_action=='place':
+            # Record fresh goal evidence before expensive image tracker setup.
+            if EstimatedScene.from_dict(snapshot['scene']).objects['goal'].valid:
                 from embodied_arm.perception.landmark_memory import FixedGoalMemory
-                self.goal_memory=FixedGoalMemory(self.lease_seconds)
+                self.goal_memory=FixedGoalMemory(self.lease_seconds,moving_wrist=self.moving_wrist)
                 self.goal_memory.remember(snapshot,frames,now=self.clock())
                 self.goal_detections=tuple(d for d in detections if d.object_id=='goal')
-                self.goal_tracker=RGBRegionTracker(clock=self.clock,refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames)
-                self.goal_tracker.start(self._packet(frames),detections,snapshot['robot']['epoch'],now=self.clock(),required_objects=('goal',))
+                self.goal_tracker=RGBRegionTracker(clock=self.clock,refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames,moving_wrist=self.moving_wrist)
+                self.goal_tracker.start(self._packet(frames),detections,snapshot['robot']['epoch'],now=self.clock(),required_objects=('goal',),**self._calibration_args(frames))
+            self._start_static(self.required_objects)
         self.phase = phase
         if (phase in ('closing','lift') or self.task_action=='place' and phase=='approach') and self.dynamic is None:
             from embodied_arm.perception.visual_feedback import _from_snapshot
-            self.dynamic = DynamicRGBPhaseTracker(profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds)
+            self.dynamic = DynamicRGBPhaseTracker(profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,moving_wrist=self.moving_wrist)
             self.dynamic.start(_from_snapshot(self.latest), self.frames, object_id=object_id, now=self.clock())
             point=EstimatedScene.from_dict(self.latest['scene']).objects[object_id]
             self.dynamic_seed=(point.xyz,tuple(self.latest['robot']['ee']))
@@ -84,9 +123,17 @@ class PhaseSceneObserver:
             self._start_static(self.required_objects)
         return self.observe()
 
+    def _calibration_args(self,frames):
+        return {'calibrations':[f.calibration.to_dict() for f in frames]} if self.moving_wrist else {}
+
     def _start_static(self, required):
-        self.static = RGBRegionTracker(clock=self.clock, refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames)
-        result = self.static.start(self._packet(self.frames), self.detections, self.latest['robot']['epoch'], now=self.clock(), required_objects=required)
+        self.static = RGBRegionTracker(clock=self.clock, refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames,moving_wrist=self.moving_wrist)
+        # Refiners require six slots; unobserved optional landmarks stay unknown.
+        known={(d.camera_id,d.object_id):d for d in self.detections}
+        seeds=tuple(known.get((cid,obj),PixelDetection(obj,cid,self.frames[0].frame_id,None,0.,None,
+            'unknown','goal_center' if obj=='goal' else 'top_face_center'))
+            for obj in ('red','blue','goal') for cid in ('left','right'))
+        result = self.static.start(self._packet(self.frames), seeds, self.latest['robot']['epoch'], now=self.clock(), required_objects=required,**self._calibration_args(self.frames))
         if not result.accepted:
             raise ValueError('static_association_rejected')
 
@@ -113,21 +160,40 @@ class PhaseSceneObserver:
         bounds=None
         if self.source.roi_tracking:
             from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
-            seeds=list(self.detections)+list(self.goal_detections)
+            if self.moving_wrist:
+                current=self.sim.camera_calibrations()
+                calibrations={c['camera_id']:CameraCalibration.from_dict(c) for c in current}
+                seeds=list(self.static.projected_seeds(current))
+            else:
+                current=self._packet(self.frames)['images']
+                calibrations={f.camera_id:f.calibration for f in self.frames}
+                seeds=list(self.detections)
             if self.dynamic:
                 xyz,tcp=self.dynamic_seed
                 predicted=[p+now-old for p,now,old in zip(xyz,before['ee'],tcp)]
-                calibrations={f.camera_id:f.calibration for f in self.frames}
-                seeds=[replace(d,uv=calibrations[d.camera_id].project(predicted)) if d.object_id==self.object_id else d for d in seeds]
-            scope=(*self.required_objects,'goal') if self.goal_detections else self.required_objects
-            bounds=bounds_from_detections(self._packet(self.frames)['images'],seeds,scope)
+                seeds=[d for d in seeds if d.object_id!=self.object_id]+[
+                    replace(d,uv=calibrations[d.camera_id].project(predicted))
+                    for d in self.detections if d.object_id==self.object_id]
+            scope=self.required_objects
+            if self.task_action=='place' and self.goal_detections:
+                try:
+                    goals=self.goal_tracker.projected_seeds(current) if self.moving_wrist else self.goal_detections
+                    seeds=[d for d in seeds if d.object_id!='goal']+list(goals)
+                    scope=(*scope,'goal')
+                except ValueError:pass  # Optional fixed-goal memory remains historical.
+            bounds=bounds_from_detections(current,seeds,scope)
         packet = self.sim.capture_frames(roi_bounds=bounds) if bounds else self.sim.capture_frames()
+        if self.moving_wrist:
+            from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
+            validate_capture_geometry(packet)
+            if packet['calibrations']!=self.sim.camera_calibrations():raise ValueError('Capture calibration does not match paused encoders')
         calibrations = {x['camera_id']: CameraCalibration.from_dict(x) for x in packet['calibrations']}
         frames = tuple((RGBFrame.from_jpeg(packet['frame_id'], packet['captured_at'], calibrations[x['camera_id']], base64.b64decode(x['data_url'].split(',', 1)[1])) for x in packet['images']))
         self.last_captured_frames=frames
         previous_calibrations={f.camera_id:f.calibration for f in self.frames}
-        if any(f.calibration!=previous_calibrations.get(f.camera_id) for f in frames):raise ValueError('Camera calibration changed')
-        tracked = self.static.track(self._packet(frames), before['epoch'], now=self.clock())
+        from embodied_arm.perception.moving_camera_geometry import compatible_calibrations
+        if not compatible_calibrations(previous_calibrations,calibrations,moving_wrist=self.moving_wrist):raise ValueError('Camera calibration changed')
+        tracked = self.static.track(self._packet(frames), before['epoch'], now=self.clock(),**self._calibration_args(frames))
         if not tracked.accepted:
             raise ValueError('Static RGB association lost: '+tracked.reason)
         detections = list(tracked.detections)
@@ -142,8 +208,8 @@ class PhaseSceneObserver:
             if not moved.accepted:
                 raise ValueError('Dynamic RGB association lost; semantic refresh required')
             detections += list(moved.detections)
-        if self.goal_tracker and self.goal_tracker.status()['active']:
-            goal_result=self.goal_tracker.track(self._packet(frames),before['epoch'],now=self.clock())
+        if self.task_action=='place' and self.goal_tracker and self.goal_tracker.status()['active']:
+            goal_result=self.goal_tracker.track(self._packet(frames),before['epoch'],now=self.clock(),**self._calibration_args(frames))
             if goal_result.accepted:
                 goal_scene=estimate_scene(frames,goal_result.detections,now=self.clock(),workspace=OBSERVATION_VOLUME,config=PerceptionConfig(max_frame_age_s=3,max_position_std_m=.003,max_ray_separation_m=.006))
                 self.goal_memory.check_visible(goal_scene,now=self.clock())

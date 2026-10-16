@@ -226,3 +226,14 @@ def test_terminal_observer_failure_never_returns_completed(failure):
     result=motion.move_to(sim.state['ee'],ZERO,deadline=10,cancel_event=cancel,event_callback=event)
     assert result['status']=='stopped'
     assert result['actions']==result['calls']==0
+
+
+def test_applied_command_event_survives_failed_visual_feedback():
+    sim,jev,motion=driver();events=[]
+    def fail():raise ValueError('occluded')
+    result=motion.gripper(0,after_motion=fail,event_callback=events.append)
+    assert result['status']=='stopped' and result['actions']==1
+    applied=[e for e in events if e['phase']=='motion_applied']
+    assert len(applied)==1 and applied[0]['applied'] is True
+    assert applied[0]['visually_verified'] is False
+    assert not any(e['phase']=='motion_completed' for e in events)

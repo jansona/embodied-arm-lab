@@ -11,6 +11,7 @@ import multiprocessing
 import os
 import stat
 import time
+from embodied_arm.providers.request_telemetry import worker_telemetry, request_audit_fields
 from embodied_arm.runtime.ipc import number
 from embodied_arm.providers.so101_jev import SO101Decision, validate_observation, validate_decision
 from embodied_arm.runtime.so101_ipc import (SO101Store, MAX_BYTES, MAX_CALLS, MAX_SECONDS, DEFAULT_CALLS, DEFAULT_SECONDS, POLL_SECONDS,
@@ -29,6 +30,7 @@ def _inference_loop(adapter, connection, inherited_fds):
                 break
             observation = validate_observation(command['observation'])
             try:
+                if hasattr(adapter, 'last_request'): adapter.last_request = None
                 result = adapter.decide(observation)
             except BaseException:
                 result = failure('adapter_error', observation)
@@ -38,7 +40,8 @@ def _inference_loop(adapter, connection, inherited_fds):
                 result = validate_decision(result.to_dict(), observation)
             except (ValueError, TypeError, RecursionError):
                 result = failure('invalid_response', observation)
-            connection.send_bytes(_json({'id': command['id'], 'result': result.to_dict()}))
+            connection.send_bytes(_json({'id': command['id'], 'result': result.to_dict(),
+                'telemetry': worker_telemetry(getattr(adapter, 'last_request', None), 'cerebellum')}))
     except (EOFError, OSError, ValueError, TypeError, RecursionError):
         pass
     finally:
@@ -137,6 +140,7 @@ def worker_run(adapter, max_calls=DEFAULT_CALLS, max_seconds=DEFAULT_SECONDS):
                     process.start()
                     child_connection.close()
                 result = None
+                telemetry = None
                 cancelled = False
                 call_started = time.monotonic()
                 counters['calls'] += 1
@@ -149,9 +153,10 @@ def worker_run(adapter, max_calls=DEFAULT_CALLS, max_seconds=DEFAULT_SECONDS):
                             break
                         if connection.poll(min(POLL_SECONDS, max(0, deadline - time.monotonic()))):
                             raw = _loads(connection.recv_bytes(MAX_BYTES))
-                            if not isinstance(raw, dict) or set(raw) != {'id', 'result'} or raw['id'] != job:
+                            if not isinstance(raw, dict) or set(raw) != {'id', 'result', 'telemetry'} or raw['id'] != job:
                                 raise ValueError('Invalid SO101 helper response')
                             result = validate_decision(raw['result'], observation)
+                            telemetry = worker_telemetry(raw['telemetry'], 'cerebellum')
                             break
                         if not process.is_alive():
                             terminal = 'worker_error'
@@ -178,6 +183,7 @@ def worker_run(adapter, max_calls=DEFAULT_CALLS, max_seconds=DEFAULT_SECONDS):
                 counters['processed'] += 1
                 delivered = not cancelled and time.time() < data['expires_at']
                 audit.append({'id': job, 'observation_sha256': data['observation_sha256'],
+                    **request_audit_fields(telemetry, 'cerebellum'),
                     'accepted': safe['accepted'], 'reason': safe['reason'], 'action': safe['action'],
                     'proposed_choice': safe['proposed_choice'], 'confidence': safe['confidence'],
                     'axis_index': safe['axis_index'], 'calls': counters['calls'],

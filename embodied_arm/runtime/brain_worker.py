@@ -13,9 +13,10 @@ import multiprocessing
 import os
 import stat
 import time
+from embodied_arm.providers.request_telemetry import worker_telemetry, request_audit_fields
 
 from embodied_arm.providers.brain import BrainResult, MODEL
-from embodied_arm.runtime.brain_ipc import (BrainStore, MAX_CALLS, MAX_SECONDS, POLL_SECONDS,
+from embodied_arm.runtime.brain_ipc import (BrainStore, MAX_CALLS, MAX_SECONDS, MAX_REPLANS, POLL_SECONDS,
                        REQUEST_SECONDS, REPLAN_REQUEST_SCHEMA, RESULT_SCHEMA,
                        validate_job, validate_result)
 from embodied_arm.runtime.ipc import MAX_BYTES, number
@@ -31,6 +32,7 @@ def _invoke(brain, data, connection, inherited_fds):
             pass
     try:
         try:
+            if hasattr(brain, 'last_request'): brain.last_request = None
             if data['schema'] == REPLAN_REQUEST_SCHEMA:
                 result = brain.replan(data['text'], data['scene'], data['previous_plan'],
                                       data['feedback'], history=data['history'])
@@ -41,9 +43,10 @@ def _invoke(brain, data, connection, inherited_fds):
             safe = validate_result(result.to_dict(), data['scene']).to_dict()
         except BaseException:
             safe = BrainResult(reason='adapter_error').to_dict()
-        raw = json.dumps(safe, allow_nan=False, separators=(',', ':')).encode()
+        telemetry = worker_telemetry(getattr(brain, 'last_request', None), 'brain')
+        raw = json.dumps({'result': safe, 'telemetry': telemetry}, allow_nan=False, separators=(',', ':')).encode()
         if len(raw) > MAX_BYTES:
-            raw = json.dumps(BrainResult(reason='invalid_response').to_dict()).encode()
+            raw = json.dumps({'result': BrainResult(reason='invalid_response').to_dict(), 'telemetry': None}).encode()
         connection.send_bytes(raw)
     except (OSError, ValueError, TypeError):
         pass
@@ -63,7 +66,8 @@ def _reap(process):
     process.close()
 
 
-def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
+def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS, max_replans=1):
+    if type(max_replans) is not int or not 0<=max_replans<=MAX_REPLANS:raise ValueError("Invalid replan budget")
     if type(max_calls) is not int or not 1 <= max_calls <= MAX_CALLS:
         raise ValueError('Call budget must be 1 to 10')
     if not number(max_seconds) or not 0 < max_seconds <= MAX_SECONDS:
@@ -78,7 +82,7 @@ def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
     deadline = started + max_seconds
     counters = {'status': 'ready', 'calls': 0, 'processed': 0, 'rejected': 0,
                 'cancelled': 0, 'elapsed_seconds': 0.0, 'max_calls': max_calls,
-                'replans': 0, 'max_replans': 1,
+                'replans': 0, 'max_replans': max_replans,
                 'max_seconds': max_seconds, 'deadline_unix': time.time() + max_seconds}
     audit = []
 
@@ -132,7 +136,7 @@ def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                     store.delete(name)
                     continue
                 is_replan = data['schema'] == REPLAN_REQUEST_SCHEMA
-                if is_replan and counters['replans'] >= 1:
+                if is_replan and counters['replans'] >= max_replans:
                     # The parent worker owns this allowance, so fresh bridges,
                     # raw jobs and forked adapter copies cannot reset it.
                     counters['rejected'] += 1
@@ -147,6 +151,7 @@ def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                           (store.fd, lock_fd, receive.fileno())),
                     daemon=False, name='bounded-simulation-brain-call')
                 result = None
+                telemetry = None
                 cancelled = False
                 call_started = time.monotonic()
                 try:
@@ -169,7 +174,11 @@ def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                         if receive.poll(min(POLL_SECONDS, max(0, deadline - time.monotonic()))):
                             try:
                                 raw = receive.recv_bytes(MAX_BYTES)
-                                result = validate_result(json.loads(raw), data['scene'])
+                                envelope = json.loads(raw)
+                                if not isinstance(envelope, dict) or set(envelope) != {'result', 'telemetry'}:
+                                    raise ValueError('Invalid brain helper envelope')
+                                result = validate_result(envelope['result'], data['scene'])
+                                telemetry = worker_telemetry(envelope['telemetry'], 'brain')
                             except (EOFError, OSError, ValueError, TypeError, RecursionError):
                                 result = BrainResult(reason='invalid_response')
                             break
@@ -199,9 +208,10 @@ def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
                 counters['processed'] += 1
                 delivered = not cancelled and time.time() < data['expires_at']
                 # No user request, conversation, model message, exception text,
-                # HTTP data, endpoint, headers or credentials are logged.
+                # Raw HTTP data, endpoint, headers or credentials are not logged.
                 plan = safe['plan'] or {}
                 audit.append({'id': job, 'accepted': safe['accepted'], 'reason': safe['reason'],
+                              **request_audit_fields(telemetry, 'brain'),
                               'operation': 'replan' if is_replan else 'interpret',
                               'model': MODEL, 'calls': counters['calls'],
                               'provenance': safe['provenance'], 'action': plan.get('action'),
@@ -228,17 +238,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description='Run one bounded simulation-only Qwen brain window')
     parser.add_argument('--config', required=True, help='Explicit saved configuration outside the project')
     parser.add_argument('--max-calls', type=int, default=MAX_CALLS)
+    parser.add_argument('--max-replans', type=int, default=1)
     parser.add_argument('--max-seconds', type=float, default=MAX_SECONDS)
     args = parser.parse_args(argv)
     # Validate limits before opening the explicit saved configuration. Never
     # discover credentials, echo paths/configuration or accept a destination.
-    if not 1 <= args.max_calls <= MAX_CALLS or not number(args.max_seconds) or not 0 < args.max_seconds <= MAX_SECONDS:
+    if not 0<=args.max_replans<=MAX_REPLANS or not 1 <= args.max_calls <= MAX_CALLS or not number(args.max_seconds) or not 0 < args.max_seconds <= MAX_SECONDS:
         parser.error('Limits must be 1 to 10 calls and greater than 0 to 600 seconds')
     try:
         from embodied_arm.providers.brain import QwenBrain
         brain = QwenBrain.from_config(args.config, max_calls=args.max_calls,
-                                     timeout=min(30, args.max_seconds), use_environment_network=True)
-        print(json.dumps(worker_run(brain, args.max_calls, args.max_seconds)))
+                                     timeout=min(30, args.max_seconds), use_environment_network=True,max_replans=args.max_replans)
+        print(json.dumps(worker_run(brain, args.max_calls, args.max_seconds,args.max_replans)))
     except Exception:
         print(json.dumps({'status': 'worker_error'}))
         raise SystemExit(1) from None

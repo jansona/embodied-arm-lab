@@ -60,3 +60,33 @@ def test_failed_capture_cannot_be_retried_faster_than_configured_interval():
  with pytest.raises(ValueError):s.get()
  assert sim.calls==2
  s.close()
+
+
+def test_camera_metadata_preserved_but_oracle_fields_dropped():
+    from embodied_arm.simulation.so101_simulation import SO101Simulation
+    from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
+    sim=SO101Simulation(camera_profile='observer_wrist')
+    try:
+        original=sim.capture_preview_frames
+        def capture():
+            packet=original();packet['objects']={'red':[1,2,3]};packet['depth']='forbidden'
+            packet['view_metadata'][0]['object_pose']='forbidden'
+            packet['images'][0]['segmentation']='forbidden'
+            return packet
+        sim.capture_preview_frames=capture
+        sampler=CameraSampler(sim)
+        packet=sampler.get();validate_capture_geometry(packet)
+        assert set(packet)=={'frame_id','captured_at','images','camera_profile','view_metadata','calibrations'}
+        assert 'objects' not in packet and 'depth' not in packet
+        assert 'object_pose' not in packet['view_metadata'][0]
+        assert 'segmentation' not in packet['images'][0]
+        sampler.close()
+    finally:sim.close()
+
+def test_undeclared_legacy_camera_extras_are_not_parsed_or_exposed():
+    class Legacy(Camera):
+        def capture_frames(self):
+            return dict(super().capture_frames(),calibrations='untrusted legacy extras',view_metadata='ignored')
+    sampler=CameraSampler(Legacy())
+    try:assert set(sampler.get())=={'frame_id','captured_at','images'}
+    finally:sampler.close()

@@ -14,10 +14,12 @@ def test_live_is_explicit_and_bounded(tmp_path):
     assert len(jobs) == 4
     assert jobs[1:] == commands(live=True, config=config, workers_only=True)
     assert [job[1:3] for job in jobs[1:]] == [['-m', 'embodied_arm.runtime.' + name] for name in ['brain_worker', 'vision_worker', 'so101_worker']]
-    assert [job[-4:] for job in jobs[1:]] == [
-        ['--max-calls', '6', '--max-seconds', '600'],
-        ['--max-calls', '6', '--max-seconds', '600'],
-        ['--max-calls', '120', '--max-seconds', '420']]
+    assert [job[job.index('--max-calls'):job.index('--max-calls')+4] for job in jobs[1:]] == [
+        ['--max-calls', '10', '--max-seconds', '600'],
+        ['--max-calls', '10', '--max-seconds', '600'],
+        ['--max-calls', '200', '--max-seconds', '420']]
+    assert jobs[1][-2:] == ['--max-replans', '8']
+    assert all('--max-replans' not in job for job in jobs[2:])
     assert not (tmp_path / 'provider.json').exists()  # Builder never opens credentials.
 
 
@@ -118,7 +120,9 @@ def test_simulation_task_switch_and_notice_are_explicit(monkeypatch,tmp_path,cap
     assert all(kwargs['env']['SO101_SIMULATION_TASKS']==('1' if live else '0') for _,kwargs in launched)
     output=capsys.readouterr().out
     if live:
-        assert '120 calls/420s' in output and '120 Jev calls/300s per task' in output
+        assert '200 calls/420s' in output and '200 Jev calls/420s per task' in output
+        assert '16 calls, at most 8 reviews' in output
+        assert 'including idle time' in output and 'No automatic calls' in output
         assert 'runtime guards may stop' in output and 'No physical hardware control' in output
     else:
         assert 'task execution disabled' in output

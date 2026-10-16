@@ -31,11 +31,13 @@ def commands(*, live=False, config=None, workers_only=False, port=8766):
         path = Path(config).expanduser().resolve()
         if path == CONFIG_EXCLUSION_ROOT or CONFIG_EXCLUSION_ROOT in path.parents:
             raise ValueError('Configuration must remain outside the project')
-        for script, calls, seconds in [('brain_worker.py', 6, 600),
-                                        ('vision_worker.py', 6, 600),
-                                        ('so101_worker.py', 120, 420)]:
+        for script, calls, seconds in [('brain_worker.py', 10, 600),
+                                        ('vision_worker.py', 10, 600),
+                                        ('so101_worker.py', 200, 420)]:
             jobs.append(['-m', 'embodied_arm.runtime.' + script.removesuffix('.py'), '--config', str(path), '--max-calls', str(calls),
                          '--max-seconds', str(seconds)])
+            if script == 'brain_worker.py':
+                jobs[-1].extend(['--max-replans', '8'])
     return [[sys.executable, *job] for job in jobs]
 
 
@@ -70,10 +72,12 @@ def main(argv=None):
         if not args.workers_only:
             print(f'SO101: http://127.0.0.1:{args.port} (loopback only)', flush=True)
         if args.live:
-            print('Live window: Qwen 6 calls/600s; vision 6 calls/600s; Jev 120 calls/420s. No automatic renewal.', flush=True)
-            print('Experimental simulator tasks: at most 120 Jev calls/300s per task; runtime guards may stop execution. No physical hardware control.', flush=True)
+            print('Live window: Qwen 10 calls/600s (8 reviews); vision 10 calls/600s; Jev 200 calls/420s. No automatic renewal.', flush=True)
+            print('Experimental simulator tasks: at most 200 Jev calls/420s per task; local cycles at most 16 calls, at most 8 reviews; runtime guards may stop execution. No physical hardware control.', flush=True)
         else:
             print('Preview mode: simulator task execution disabled; no inference workers started.', flush=True)
+        if args.live:
+            print('Session clocks start at worker launch, including idle time; tasks share the remaining window. No automatic calls.', flush=True)
         print('Ctrl+C stops all processes started by this launcher.', flush=True)
         reported_expiry = False
         while not stop:
