@@ -144,6 +144,9 @@ class IPCTests(unittest.TestCase):
         adapter=MockAdapter();results=[]
         thread=threading.Thread(target=lambda:results.append(worker_run(adapter,max_seconds=.15)))
         thread.start();deadline=time.monotonic()+1
+        # Do not probe the same flock before the worker has acquired it: the
+        # status probe briefly owns an unlocked file and can race startup.
+        while not (self.root/'ready.json').exists() and time.monotonic()<deadline:time.sleep(.005)
         while not worker_status()['available'] and time.monotonic()<deadline:time.sleep(.005)
         self.assertTrue(worker_status()['available'])
         with self.assertRaises(ValueError):worker_run(adapter,max_seconds=.01)

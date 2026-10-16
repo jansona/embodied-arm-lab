@@ -24,3 +24,7 @@ config.json
 
 # Generated experiment records stay local
 artifacts/
+
+# Never publish local credentials or historical runtime evidence
+.github-cli-private/
+tests/fixtures/so101_recorded_qwen_pixels.json

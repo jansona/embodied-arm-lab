@@ -1,5 +1,6 @@
 """Offline-only protocol/security tests. No saved config or live API calls."""
 import json
+import fcntl
 import multiprocessing
 import os
 from pathlib import Path
@@ -425,6 +426,22 @@ class BrainIPCTests(unittest.TestCase):
         finally:
             store.close()
         self.assertFalse(worker_status()['available'])
+
+    def test_status_probe_lock_does_not_reject_worker_startup(self):
+        store = BrainStore()
+        store.write('worker.lock', {})
+        fd = os.open('worker.lock', os.O_RDWR | os.O_NOFOLLOW, dir_fd=store.fd)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        timer = threading.Timer(.02, lambda: fcntl.flock(fd, fcntl.LOCK_UN))
+        timer.start()
+        try:
+            done = worker_run(MockBrain(), max_seconds=.08)
+            self.assertEqual(done['status'], 'time_budget')
+            self.assertEqual(done['calls'], 0)
+        finally:
+            timer.join(1)
+            os.close(fd)
+            store.close()
 
     def test_sequence_interpret_then_one_repair_share_worker_budget(self):
         brain, worker, done = self.start_worker(RepairBrain(), calls=2)

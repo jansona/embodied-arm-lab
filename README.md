@@ -4,7 +4,7 @@ CPU-only robotics sandbox with a browser view, a Qwen conversation planner, and 
 
 ## Published scope
 
-This public checkout contains the Panda v3 source baseline only. The baseline source checkpoint is preserved on `baseline/panda-v3`. The experimental SO101 v4 implementation has not been published here.
+This public checkout contains the Panda v3 baseline plus an experimental SO101 v4 implementation. The tested Panda source checkpoint is preserved on `baseline/panda-v3`. See `SO101-EXPERIMENT.md` for the separate SO101 app and `SO101-VALIDATION.md` for historical validation limits. The architecture and original setup below describe the Panda baseline.
 
 Historical experiment records, runtime/session artifacts, credentials and private configuration are not included. The results below summarize prior development trials; this checkout does not contain their original evidence or reproduce those sessions automatically.
 
@@ -102,6 +102,10 @@ Main modules: `brain.py`, `brain_ipc.py`, `brain_worker.py`, `microcontrol_exper
 
 ## Source-only publication
 
-Only the Panda v3 source baseline is published. Historical demonstration evidence, runtime/session records, credentials and private configuration are excluded. SO101 v4 publication remains pending.
+The Panda baseline and experimental SO101 source are published. Historical demonstration evidence, runtime/session records, credentials, private configuration and recorded AI pixel fixtures are excluded. The historical high-resolution replay evaluators are also omitted because their original input fixture is not published.
 
 Publication excludes these legacy runtime replay/audit packaging utilities: `gripper_context_replay.py`, `microcontrol_context_replay.py`, `microcontrol_hold_audit.py`, `package_project.py`. The offline tests do not depend on them.
+
+## SO101 experimental status
+
+SO101 uses camera-derived perception and an experimental image-guided controller. Prior live testing achieved one image-guided Jev movement; a complete hover, grasp and stack have not been demonstrated. The optional high-resolution profile passed strict precision-and-freshness checks in only 1 of 15 historical held-out scenes, and remains off by default. Those historical trials cannot be replayed from this public checkout without separately supplied inputs. Software test results do not establish reliable real-robot control.

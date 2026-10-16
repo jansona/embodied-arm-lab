@@ -93,10 +93,17 @@ def worker_run(brain, max_calls=MAX_CALLS, max_seconds=MAX_SECONDS):
         info = os.fstat(lock_fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
             raise ValueError('Unsafe brain worker lock')
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise ValueError('A brain worker is already active') from None
+        # A status probe briefly locks an idle file to verify availability.
+        # Retry that startup race without extending the worker's time budget.
+        lock_wait_deadline = min(deadline, time.monotonic() + .05)
+        while True:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= lock_wait_deadline:
+                    raise ValueError('A brain worker is already active') from None
+                time.sleep(.001)
         locked = True
         store.write('last-run-audit.json', [])
         publish('ready')

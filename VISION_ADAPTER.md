@@ -1,0 +1,13 @@
+# RGB-only Qwen perception adapter
+
+`QwenVision.perceive(packet)` sends exactly two calibrated-camera RGB JPEGs to `qwen3.8-max`, using the approved Aliyun chat-completions endpoint. The request includes image dimensions, camera labels, frame ID and a fixed perception instruction. Camera calibration stays local. World object positions, simulator body IDs, depth, segmentation, secret configuration and arbitrary extra packet fields are excluded from the model request.
+
+The output uses the shared `camera_perception.PixelDetection` type. It identifies matching top-face centers for the red and blue cubes and the center of the green goal plane. Pixel coordinates are zero-based with the origin at the top left. There are exactly six correspondences: three landmarks in each of two views. Unknown, occluded, absent or ambiguous features reject the complete result for motion. There is no image-color detector or ground-truth fallback inside the adapter.
+
+The model's confidence and pixel uncertainty are self-reported estimates, not calibrated statistical guarantees. Independent calibration, triangulation, epipolar/reprojection checks and geometric uncertainty limits remain mandatory. A plausible but wrong feature pair can pass simple geometry tests; live accuracy and manipulation success therefore require real evaluation.
+
+Freshness is checked both before and after the API response. The caller must freeze physics while capturing and interpreting a scene, record an epoch/generation and reject a result if the epoch changes. The planned integration allows at most a bounded 30-second frozen-scene window. Any motion invalidates that snapshot; recapture and re-estimate at control boundaries. Do not silently enlarge freshness limits to accept old moving-scene data.
+
+Only an explicit `perceive` call uses the network. There is one call, no retries and no substitute model. The constructor accepts an already-authorized server-side credential; this module never reads a credential file. Missing configuration is a visible blocker. HTTP errors, redirects, malformed or oversized responses, truncation, stale frames and unsupported detections return a rejected result with a short reason code, without provider bodies or credentials.
+
+Offline tests: `.venv311/bin/python -m pytest -q tests/test_vision_adapter.py`. Tests use fake JPEG fixtures and mocked responses, including a request spy proving that seeded ground-truth metadata does not enter the HTTP body. These tests validate protocol and rejection behavior; they do not establish Qwen perception accuracy. No live vision request was made during this implementation.

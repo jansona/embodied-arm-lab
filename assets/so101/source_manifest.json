@@ -1,0 +1,161 @@
+{
+  "repository": "TheRobotStudio/SO-ARM100",
+  "commit": "a758567c3978dfeefe282ede0500085a48fe8f78",
+  "urdf": {
+    "path": "Simulation/SO101/so101_new_calib.urdf",
+    "sha": "9552a231d8b23bed68ec15779eba620c5d875ec4"
+  },
+  "assets": [
+    {
+      "path": "Simulation/SO101/assets/base_motor_holder_so101_v1.stl",
+      "git_blob_sha": "cac2b8dd98d3d8a6dcdf429b36aaa4b576d82041",
+      "size": 1877084,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/base_motor_holder_so101_v1.stl",
+      "sha256": "8cd2f241037ea377af1191fffe0dd9d9006beea6dcc48543660ed41647072424"
+    },
+    {
+      "path": "Simulation/SO101/assets/base_so101_v2.stl",
+      "git_blob_sha": "ed10aa61d1181f8001c908ee5cae5c4f970ba417",
+      "size": 471584,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/base_so101_v2.stl",
+      "sha256": "bb12b7026575e1f70ccc7240051f9d943553bf34e5128537de6cd86fae33924d"
+    },
+    {
+      "path": "Simulation/SO101/assets/waveshare_mounting_plate_so101_v2.stl",
+      "git_blob_sha": "4dba1f22b01ab9afef2466872fcb3e1efca89e38",
+      "size": 62784,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/waveshare_mounting_plate_so101_v2.stl",
+      "sha256": "e197e24005a07d01bbc06a8c42311664eaeda415bf859f68fa247884d0f1a6e9"
+    },
+    {
+      "path": "Simulation/SO101/assets/motor_holder_so101_base_v1.stl",
+      "git_blob_sha": "9eaf67243a5ffc2dacb3fbd026b4c0620adcdd66",
+      "size": 1129384,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/motor_holder_so101_base_v1.stl",
+      "sha256": "31242ae6fb59d8b15c66617b88ad8e9bded62d57c35d11c0c43a70d2f4caa95b"
+    },
+    {
+      "path": "Simulation/SO101/assets/rotation_pitch_so101_v1.stl",
+      "git_blob_sha": "5c05dee570623f62c4ab7597d76c7bdea20eacea",
+      "size": 883684,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/rotation_pitch_so101_v1.stl",
+      "sha256": "9be900cc2a2bf718102841ef82ef8d2873842427648092c8ed2ca1e2ef4ffa34"
+    },
+    {
+      "path": "Simulation/SO101/assets/upper_arm_so101_v1.stl",
+      "git_blob_sha": "9c0f9b275a51f720476e529c92193f4f69d4784c",
+      "size": 1303484,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/upper_arm_so101_v1.stl",
+      "sha256": "475056e03a17e71919b82fd88ab9a0b898ab50164f2a7943652a6b2941bb2d4f"
+    },
+    {
+      "path": "Simulation/SO101/assets/under_arm_so101_v1.stl",
+      "git_blob_sha": "480e0583c8bb27ff9affefbebee72b784fb054c8",
+      "size": 1975884,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/under_arm_so101_v1.stl",
+      "sha256": "d01d1f2de365651dcad9d6669e94ff87ff7652b5bb2d10752a66a456a86dbc71"
+    },
+    {
+      "path": "Simulation/SO101/assets/motor_holder_so101_wrist_v1.stl",
+      "git_blob_sha": "d0aa18b15a9cd63f41fa4d48e82df7a3b618c75d",
+      "size": 1052184,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/motor_holder_so101_wrist_v1.stl",
+      "sha256": "887f92e6013cb64ea3a1ab8675e92da1e0beacfd5e001f972523540545e08011"
+    },
+    {
+      "path": "Simulation/SO101/assets/wrist_roll_pitch_so101_v2.stl",
+      "git_blob_sha": "ac5172a35e6da3e9fdea21e25803f23cc61e31f1",
+      "size": 2699784,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/wrist_roll_pitch_so101_v2.stl",
+      "sha256": "6c7ec5525b4d8b9e397a30ab4bb0037156a5d5f38a4adf2c7d943d6c56eda5ae"
+    },
+    {
+      "path": "Simulation/SO101/assets/wrist_roll_follower_so101_v1.stl",
+      "git_blob_sha": "123ce374ad3efc240e4d7022f31314e59fe4b0c0",
+      "size": 1439884,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/wrist_roll_follower_so101_v1.stl",
+      "sha256": "4b17b410a12d64ec39554abc3e8054d8a97384b2dc4a8d95a5ecb2a93670f5f4"
+    },
+    {
+      "path": "Simulation/SO101/assets/moving_jaw_so101_v1.stl",
+      "git_blob_sha": "7e8736686592072cf34c7f6e2e6e88f8a3ba60bb",
+      "size": 1413584,
+      "url": "https://raw.githubusercontent.com/TheRobotStudio/SO-ARM100/a758567c3978dfeefe282ede0500085a48fe8f78/Simulation/SO101/assets/moving_jaw_so101_v1.stl",
+      "sha256": "785a9dded2f474bc1d869e0d3dae398a3dcd9c0c345640040472210d2861fa9d"
+    }
+  ],
+  "modifications": [
+    "Replaced sts3215_03a_v1.stl and sts3215_03a_no_horn_v1.stl visual/collision references with authored 25x45x35 mm primitive boxes; these are illustrative servo envelopes, not precision vendor CAD.",
+    "Preserved upstream joint origins, limits, link masses and inertia tensors.",
+    "Decomposed wrist_roll_follower_so101_v1 and moving_jaw_so101_v1 printed-mesh collisions into 7 and 5 convex hulls using installed PyBullet 3.2.7 V-HACD. Official visuals unchanged.",
+    "Added sandbox_grasp_center_link at [-0.012,0,0] relative to upstream gripper_frame_link, which lies on the fixed-jaw inner face. This extra fixed frame is a nominal grasp center for 20 mm cubes."
+  ],
+  "collision_generation": {
+    "tool": "PyBullet 3.2.7 built-in vhacd",
+    "input": "Vertices/faces from the two pinned official binary STL files, converted locally to OBJ as data",
+    "parameters": {
+      "resolution": 100000,
+      "depth": 10,
+      "concavity": 0.0025,
+      "planeDownsampling": 4,
+      "convexhullDownsampling": 4,
+      "maxNumVerticesPerCH": 32,
+      "minVolumePerCH": 1e-05
+    },
+    "note": "Each hull gets its own URDF collision element, preserving the original mesh origin. No external repository code or scripts were executed."
+  },
+  "generated_files": [
+    {
+      "path": "assets/moving_jaw_so101_v1_hull_0.obj",
+      "sha256": "89a8223ffa0c8e40532782a9e0a305f14564e322872bf4e7df2014f7fa933ea6"
+    },
+    {
+      "path": "assets/moving_jaw_so101_v1_hull_1.obj",
+      "sha256": "03b7dfb18b6aec9b92874cbbb4dda96d317a4e0c98db6c43792a554f7223b016"
+    },
+    {
+      "path": "assets/moving_jaw_so101_v1_hull_2.obj",
+      "sha256": "c0f5db60d99434a6a83bb6fd401ecd8275ed93065c8d438321a20bfc24561763"
+    },
+    {
+      "path": "assets/moving_jaw_so101_v1_hull_3.obj",
+      "sha256": "737aa2b4e1e2e1955b1667117ff065c349d7d4c851a70ae2a6331667b5e2401c"
+    },
+    {
+      "path": "assets/moving_jaw_so101_v1_hull_4.obj",
+      "sha256": "bcdb705d10b1a4751d85189cae02efebc42d97133934fe63d0a28c5694063054"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_0.obj",
+      "sha256": "5b7e2781c7992682470d143889325047d118e0edc6b70f39b9ec36ad8b96e8ac"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_1.obj",
+      "sha256": "7291b7ded1c9fba603970e50f398a47b981f3423a2c6ff8fc79dffa4d664a807"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_2.obj",
+      "sha256": "23b418b700639bfaa9378334a566398b57b93eb69dc310d0814913d3f285c3b5"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_3.obj",
+      "sha256": "1cfea3383fdcb930e909542be9ed84be362bbc9bdde1b2e9c32a218cdc37249f"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_4.obj",
+      "sha256": "bdad6e7d61f05999d739c7180afa44dfbfa8826821f7cc70a8891aa1b301de69"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_5.obj",
+      "sha256": "ed3a2bc03edcce0aa875b0d1bc9d04f55bd372ec92b635054b83d36c183a3e88"
+    },
+    {
+      "path": "assets/wrist_roll_follower_so101_v1_hull_6.obj",
+      "sha256": "dae331d03fcd68b959b832ac0412e5661ed508a18525387c00aee782eab5c48b"
+    },
+    {
+      "path": "so101.urdf",
+      "sha256": "67792b60c22d9ef0a0a9b75abb9b49a402451136e6c1e07e58d860d82b6fa753"
+    }
+  ]
+}
