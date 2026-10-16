@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import math
 from pathlib import Path
 import signal
 import subprocess
@@ -45,7 +46,10 @@ def main(argv=None):
     parser.add_argument('--workers-only', action='store_true', help='Only workers, when UI already runs in a supported execution context')
     parser.add_argument('--enable-waypoint', action='store_true', help='Enable experimental image-guided hover; not grasp or stack')
     parser.add_argument('--port', type=int, default=8766)
+    parser.add_argument('--camera-interval', type=float, default=1., help='Local RGB capture interval, 0.25..10 seconds; never periodic model calls')
     args = parser.parse_args(argv)
+    if not math.isfinite(args.camera_interval) or not .25<=args.camera_interval<=10:
+        parser.error('--camera-interval must be 0.25..10 seconds')
     try:
         jobs = commands(live=args.live, config=args.config, workers_only=args.workers_only, port=args.port)
     except ValueError as exc:
@@ -57,7 +61,7 @@ def main(argv=None):
         stop = True
     signal.signal(signal.SIGINT, interrupt)
     signal.signal(signal.SIGTERM, interrupt)
-    env = {**os.environ, 'SO101_ENABLE_WAYPOINT': '1' if args.enable_waypoint else '0'}
+    env = {**os.environ, 'SO101_ENABLE_WAYPOINT': '1' if args.enable_waypoint else '0', 'SO101_CAMERA_INTERVAL':str(args.camera_interval)}
     exit_code = 0
     try:
         for job in jobs:

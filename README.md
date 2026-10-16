@@ -24,11 +24,13 @@ python3.11 -m venv .venv
 
 ## 配置与真实模型
 
-把 `config/provider.example.json` 复制到仓库外，例如 `../arm-provider.json`，由你填入 `api_key`。不要把真实配置提交到 Git、输入网页或贴进聊天。
+把 `config/provider-v2.example.json` 复制到仓库外，例如 `../arm-provider.json`。分别填写 `brain`（大脑）和 `cerebellum`（小脑）的 `base_url`、`model`、`api_key`；两组可以使用同一把 key，也可以独立配置。视觉默认使用大脑配置。不要把真实配置提交到 Git、输入网页或贴进聊天。
+
+已有旧版单组配置仍可直接使用：加载时在内存中映射到两组，不重写文件、不要求重新输入 key。当前已验证的适配器仅支持下列百炼地址和模型，不表示任意 OpenAI-compatible 服务都能替换。
 
 - Qwen 对话/视觉：`qwen3.8-max`
 - Jev 决策：`decision-model-preview`
-- 服务：阿里云百炼，地址和模型固定校验，模板中有完整字段
+- 服务：阿里云百炼，模板填写基础地址；大脑追加 `/chat/completions`，小脑追加 `/systemone`，不会重复拼接路径
 - 环境必须获准访问服务；网络被限制时修正环境权限，不绕过限制
 
 ```sh
@@ -37,9 +39,22 @@ python3.11 -m venv .venv
 
 这会启动网页和三个有预算的 worker。打开网页本身不调用模型；主动提交对话、观察或动作请求可能产生费用。
 
+可分别检查配置或主动测试连接（没有后台连接探测）：
+
+```sh
+# 仅本地校验，不请求模型
+.venv/bin/python -m embodied_arm.providers.diagnostics --config ../arm-provider.json --component brain
+# 明确发起一次连接测试，可能计费；小脑将 brain 改成 cerebellum
+.venv/bin/python -m embodied_arm.providers.diagnostics --config ../arm-provider.json --component brain --test-connection
+```
+
+检查结果仅显示组件、目标、状态和调用次数，不输出 key 或响应正文。网络策略禁止时仍会失败；该命令不会绕过环境权限。
+
 每次窗口：对话 6 次/600 秒，视觉 6 次/600 秒，Jev 12 次/180 秒。空闲也计时，不自动续期。到期后网页保留预览，须显式重启才开新窗口。
 
-使用步骤：看相机/worker 状态 → 输入中文对话 → 需要场景时观察 → 检查计划或错误 → 必要时停止/重置。计划生成不代表动作完成。
+使用步骤：启动实时会话 → 直接输入中文要求 → 自动获取当前视觉证据 → 查看 Qwen 计划和执行状态。无需先点击识别按钮。当前抓放执行仍未通过验收，因此计划会明确显示为“未执行”，不会把对话完成冒充动作完成。
+
+双目画面默认约每秒本地采样一次，慢帧不重叠、不积压；可用 `--camera-interval 2` 修改间隔（0.25–10 秒）。这只更新本地图像，不按秒调用付费模型。涉及场景的对话会复用有效视觉证据，过期时先尝试本地图像跟踪，再按需发起一次视觉识别；服务不可用、超时或图像不可靠会显示具体原因。手动识别和悬停控件仅保留在诊断面板。停止会取消待处理请求，双目预览仍继续。
 
 `--enable-waypoint` 显式开启受限悬停实验，不能开启抓放。`--workers-only` 用于已有、受支持的同机分离执行环境，只启动 worker；普通单机不需要。
 

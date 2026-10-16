@@ -67,3 +67,16 @@ def test_expired_jev_blocks_before_observation_or_brain():
  assert not b.seen and not e.calls
  s.submit('你好',execute=False)
  assert wait(s)['state']=='completed'
+
+def test_reply_cannot_be_bound_to_a_different_newer_image():
+ class Changing(Source):
+  frame='first'
+  def ensure_brain_scene(self):return self.brain_scene()
+  def snapshot(self):return {'scene':{'frame_ids':{'left':self.frame,'right':self.frame}},'robot':{'epoch':1,'actions':0}}
+ source=Changing()
+ class Mutating(Brain):
+  def interpret(self,*args):
+   result=super().interpret(*args);source.frame='replacement';return result
+ brain=Mutating('pick');service=TaskService(scene_source=source,brain=brain,executor=None)
+ service.submit('夹起红块',execute=False);result=wait(service)
+ assert result['error']=='scene_stale' and result['plan'] is None and not result['plan_fresh']

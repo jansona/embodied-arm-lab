@@ -50,13 +50,38 @@ class CameraSceneSource:
                     'tracking':self.tracker.status() if self.tracker else None,
                     'refinement_profile':self.refinement_profile,'roi_tracking':self.roi_tracking,'observed_roi_bounds':self.tracking_rois,
                     'last_vision':self.last_vision,'scene':None if self.scene is None else self.scene.to_dict()}
-    def refresh(self,required_objects=('red','blue','goal')):
+    def refresh(self,required_objects=('red','blue','goal'),*,expected_generation=None):
         scope=tuple(required_objects)
         if not scope or len(set(scope))!=len(scope) or any(x not in ('red','blue','goal') for x in scope):raise ValueError('Invalid observation scope')
-        return self._observe(False,scope)
+        return self._observe(False,scope,expected_generation=expected_generation)
+    def ensure_brain_scene(self):
+        """Use valid RGB evidence or acquire it on demand, never on a timer."""
+        generation=self.generation
+        try:return self.brain_scene()
+        except ValueError:pass
+        if self.tracker is not None:
+            try:
+                self.track()
+                return self.brain_scene()
+            except ValueError:pass
+        if generation!=self.generation:raise ValueError('cancelled')
+        provider=self.vision.status() if self.vision and hasattr(self.vision,'status') else {}
+        if not provider.get('available',provider.get('configured',False)):
+            raise ValueError('vision_unavailable')
+        try:self.refresh(expected_generation=generation)
+        except Exception:
+            if generation!=self.generation:raise ValueError('cancelled') from None
+            reason=self.status()['reason']
+            allowed={'network_error','timeout','expired','call_budget_exhausted','landmark_uncertain',
+                     'occluded','occluded_or_missing_feature','uncertain_detection','low_confidence',
+                     'unavailable','scene_changed_during_vision','invalid_or_stale_frame','stale_frame'}
+            raise ValueError(reason if reason in allowed else 'observation_unavailable') from None
+        return self.brain_scene()
+
     def track(self):return self._observe(True)
-    def _observe(self,tracking,scope=None):
+    def _observe(self,tracking,scope=None,expected_generation=None):
         with self.lock:
+            if expected_generation is not None and expected_generation!=self.generation:raise ValueError('cancelled')
             if self.pending:raise ValueError('Vision request already pending')
             if tracking and (not self.refine_rgb or self.tracker is None):raise ValueError('No active RGB tracking session')
             if not tracking and self.vision is None:raise ValueError('Vision is not configured')
@@ -68,6 +93,8 @@ class CameraSceneSource:
         try:
             packet=self.sim.capture_frames(roi_bounds=self.tracking_rois) if tracking and self.tracking_rois else self.sim.capture_frames()
             vision_packet={k:packet[k] for k in ('frame_id','captured_at','images')}
+            with self.lock:
+                if generation!=self.generation:raise ValueError('cancelled')
             if tracking:
                 if packet['calibrations']!=self.tracker_calibrations:raise ValueError('Camera calibration changed')
                 refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock())
@@ -78,9 +105,14 @@ class CameraSceneSource:
                 if max(max(i['width'],i['height']) for i in vision_packet['images'])>1024:
                     from embodied_arm.perception.rgb_coarse_packet import prepare_coarse_packet,remap_result
                     prepared=prepare_coarse_packet(vision_packet);submitted=prepared.packet
+                    with self.lock:
+                        if generation!=self.generation:raise ValueError('cancelled')
                     result=self.vision.perceive(submitted)
                     if result.accepted:result=remap_result(result,prepared,native_packet=vision_packet,submitted_packet=submitted)
-                else:result=self.vision.perceive(vision_packet)
+                else:
+                    with self.lock:
+                        if generation!=self.generation:raise ValueError('cancelled')
+                    result=self.vision.perceive(vision_packet)
                 self.last_vision={'accepted':bool(result.accepted),'calls':getattr(result,'calls',None),
                     'model':getattr(result,'model',None),'provenance':getattr(result,'provenance','unverified_fixture')}
                 if not result.accepted:

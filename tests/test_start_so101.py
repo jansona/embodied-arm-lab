@@ -91,3 +91,9 @@ def test_workers_only_expiry_does_not_restart(monkeypatch, tmp_path):
     monkeypatch.setattr(start_so101.signal, 'signal', lambda *_: None)
     assert start_so101.main(['--live', '--workers-only', '--config', str(tmp_path / 'external.json')]) == 0
     assert len(children) == 3
+
+@pytest.mark.parametrize('value',['0','0.1','11','nan'])
+def test_invalid_camera_interval_fails_before_launch(monkeypatch,value):
+ import embodied_arm.runtime.start_so101 as launcher
+ monkeypatch.setattr(launcher.subprocess,'Popen',lambda *a,**k:pytest.fail('Must not launch'))
+ with pytest.raises(SystemExit):launcher.main(['--camera-interval',value])

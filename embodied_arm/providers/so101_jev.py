@@ -180,24 +180,15 @@ class SO101JevAdapter:
         self._client=httpx.Client(timeout=httpx.Timeout(timeout),follow_redirects=False,trust_env=use_environment_network,transport=transport,
                                   limits=httpx.Limits(max_connections=1,max_keepalive_connections=1))
     @classmethod
-    def from_config(cls,path,*,max_calls=12,timeout=15,use_environment_network=False):
-        """Explicit trusted worker loader; never invoked on import or preview.
-
-        Reuses the existing approved external Aliyun configuration validator and
-        preserves a configured confidence threshold if it is higher than .65.
-        Paths must come from trusted CLI/server code, never a model or browser.
-        """
-        from embodied_arm.legacy.panda.runner import JevRunner
-        class NoRobot:
-            def stop(self):pass
+    def from_config(cls,path,*,max_calls=12,timeout=None,use_environment_network=False):
+        """Load cerebellum settings independently; no legacy robot dependency."""
+        from embodied_arm.providers.configuration import load_configuration,request_timeout
         try:
-            loader=JevRunner(NoRobot(),use_environment_network=use_environment_network)
-            loader.configure(path)
-            provider=loader._adapter
-            if provider is None:raise ValueError('Missing approved configuration')
-            return cls(api_key=provider._api_key,endpoint=provider.endpoint,model=provider.model,
-                       min_confidence=max(MIN_CONFIDENCE,provider.min_confidence),
-                       timeout=timeout,max_calls=max_calls,use_environment_network=use_environment_network)
+            settings=load_configuration(path,component='cerebellum')['cerebellum']
+            bounded_timeout=request_timeout(settings,timeout)
+            return cls(api_key=settings.api_key,endpoint=settings.endpoint,model=settings.model,
+                min_confidence=settings.min_confidence,timeout=bounded_timeout,max_calls=max_calls,
+                use_environment_network=use_environment_network)
         except (OSError,ValueError,TypeError,AttributeError):
             raise ValueError('Cannot load the approved external SO101 Aliyun configuration') from None
 

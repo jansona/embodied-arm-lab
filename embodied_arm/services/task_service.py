@@ -8,7 +8,11 @@ import threading
 import time
 import uuid
 UNKNOWN_SCENE = {'observation_status': 'unavailable', 'blocks': {}}
-TERMINAL = {'completed', 'blocked', 'failed', 'cancelled'}
+TERMINAL = {'completed', 'plan_preview', 'blocked', 'failed', 'cancelled'}
+SMALL_TALK = frozenset(('你好','您好','嗨','谢谢','感谢','hello','hi','thanks','thank you'))
+OBSERVATION_ERRORS = {'vision_unavailable','network_error','timeout','expired','call_budget_exhausted',
+    'landmark_uncertain','occluded','occluded_or_missing_feature','uncertain_detection','low_confidence',
+    'unavailable','scene_stale','scene_changed_during_vision','invalid_or_stale_frame','stale_frame','observation_unavailable'}
 
 class TaskService:
 
@@ -22,6 +26,7 @@ class TaskService:
         self.thread = None
         self.cancel_event = threading.Event()
         self.history = []
+        self.plan_binding=None
         self.record = {'id': None, 'state': 'idle', 'events': [], 'plan': None, 'error': None, 'execute': False}
 
     def execution_readiness(self):
@@ -33,7 +38,16 @@ class TaskService:
     def status(self):
         with self.lock:
             ready=self.execution_readiness()
-            return deepcopy({**self.record, 'history': self.history, 'pending': bool(self.thread and self.thread.is_alive()), 'execution_available': ready['available'], 'unavailable_reason': ready['reason']})
+            plan_fresh=False
+            if self.plan_binding is not None:
+                try:plan_fresh=self._binding(self.source.snapshot())==self.plan_binding
+                except ValueError:pass
+            return deepcopy({**self.record, 'plan_fresh':plan_fresh, 'history': self.history, 'pending': bool(self.thread and self.thread.is_alive()), 'execution_available': ready['available'], 'unavailable_reason': ready['reason']})
+
+    @staticmethod
+    def _binding(snapshot):
+        scene=snapshot.get('scene',{});robot=snapshot.get('robot',{})
+        return {'frame_ids':scene.get('frame_ids'),'epoch':robot.get('epoch'),'actions':robot.get('actions')}
 
     def _event(self, generation, state, detail=None):
         with self.lock:
@@ -58,9 +72,10 @@ class TaskService:
             if execute and not self.execution_readiness()['available']:
                 raise ValueError('execution_unavailable')
             self.generation += 1
+            self.plan_binding=None
             generation = self.generation
             self.cancel_event = threading.Event()
-            self.record = {'id': uuid.uuid4().hex, 'state': 'queued', 'events': [], 'plan': None, 'error': None, 'execute': execute}
+            self.record = {'id': uuid.uuid4().hex, 'state': 'queued', 'events': [], 'plan': None, 'error': None, 'execute': execute, 'motion_executed':False}
             history = deepcopy(self.history[-6:])
             self.history.append({'role': 'user', 'content': text.strip()})
             self.history = self.history[-20:]
@@ -72,36 +87,48 @@ class TaskService:
         phase = 'planning'
         try:
             scene = UNKNOWN_SCENE
-            if execute:
+            ensure=getattr(self.source,'ensure_brain_scene',None)
+            smalltalk=text.strip().lower().strip('!！。.?？') in SMALL_TALK
+            if execute or ensure is not None and not smalltalk:
                 phase = 'observing'
-                if not self._event(generation, phase):
-                    return
-                self.source.refresh()
-                if cancel.is_set():
-                    return
-                scene = self.source.brain_scene()
+                if not self._event(generation, phase):return
+                if ensure is not None:scene=ensure()
+                else:
+                    self.source.refresh()
+                    scene=self.source.brain_scene()
+                if cancel.is_set():return
+            elif ensure is not None:
+                try:scene=self.source.brain_scene()
+                except ValueError:pass
             phase = 'planning'
             if not self._event(generation, phase):
                 return
+            input_binding=self._binding(self.source.snapshot()) if scene!=UNKNOWN_SCENE else None
             result = self.brain.interpret(text, scene, history)
             if cancel.is_set():
                 return
             if not result.accepted or result.plan is None:
                 raise ValueError('brain_rejected')
+            if scene!=UNKNOWN_SCENE:
+                try:binding=self._binding(self.source.snapshot())
+                except ValueError:raise ValueError('scene_stale') from None
+                if binding!=input_binding:raise ValueError('scene_stale')
             plan = result.plan.to_dict()
-            if not execute and plan['action'] not in ('status', 'clarify', 'stop'):
+            if not execute and scene==UNKNOWN_SCENE and plan['action'] not in ('status', 'clarify', 'stop'):
                 raise ValueError('unexpected_motion_plan')
             with self.lock:
                 if generation != self.generation:
                     return
                 self.record['plan'] = plan
+                self.plan_binding=binding if scene!=UNKNOWN_SCENE else None
                 self.record['provenance'] = getattr(result, 'provenance', 'unknown')
                 self.history.append({'role': 'assistant', 'content': plan['message']})
             if plan['action'] in ('status', 'clarify', 'stop'):
                 self._event(generation, 'completed', 'conversation_only')
                 return
             if not execute:
-                raise ValueError('unexpected_motion_plan')
+                self._event(generation,'plan_preview','execution_not_requested')
+                return
             if plan['action'] not in ('pick', 'place'):
                 raise ValueError('unsupported_task')
             self.source.snapshot()
@@ -113,7 +140,9 @@ class TaskService:
                 return
             if isinstance(outcome,dict):
                 with self.lock:
-                    if generation==self.generation:self.record['outcome']=deepcopy(outcome)
+                    if generation==self.generation:
+                        self.record['outcome']=deepcopy(outcome)
+                        self.record['motion_executed']=bool(outcome.get('actions',0))
             if not isinstance(outcome, dict) or outcome.get('verified') is not True:
                 raise ValueError('execution_unverified')
             with self.lock:
@@ -125,7 +154,7 @@ class TaskService:
         except Exception as exc:
             if cancel.is_set():
                 return
-            allowed = {'brain_rejected', 'unexpected_motion_plan', 'unsupported_task', 'execution_unverified'}
+            allowed = {'brain_rejected', 'unexpected_motion_plan', 'unsupported_task', 'execution_unverified'} | OBSERVATION_ERRORS
             reason = str(exc) if str(exc) in allowed else {'observing': 'observation_unavailable', 'planning': 'planning_failed', 'executing': 'execution_failed'}[phase]
             with self.lock:
                 if generation == self.generation:

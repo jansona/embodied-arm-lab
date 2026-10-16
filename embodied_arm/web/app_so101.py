@@ -33,9 +33,11 @@ class WaypointRequest(BaseModel):
     object_id:Literal['red','blue']
 
 class SO101Session:
-    def __init__(self,sim,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None):
+    def __init__(self,sim,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None,camera_interval_seconds=1.):
         self.sim=sim;self.lock=threading.RLock();self.closed=False
         self.frames=None;self.frames_time=0.;self.generation=0
+        from embodied_arm.services.camera_sampler import CameraSampler
+        self.camera=CameraSampler(sim,interval_seconds=camera_interval_seconds)
         if source_factory is None:
             from embodied_arm.control.so101_control import CameraSceneSource
             self.source=CameraSceneSource(sim,vision=vision,refine_rgb=True)
@@ -65,7 +67,7 @@ class SO101Session:
             brain_ready=bool(brain_status.get('available',brain_status.get('configured',False)))
             workflow=self.task_service.status()
             chat_state={'queued':'thinking','planning':'thinking','completed':'ready','failed':'error','blocked':'error'}.get(workflow['state'],workflow['state'])
-            return {'schema':'so101-ui-v1','robot':self.sim.proprioception(),
+            return {'schema':'so101-ui-v1','robot':self.sim.proprioception(),'camera':self.camera.status(),
                 'perception':{**perception,'configured':bool(vision.get('available',vision.get('configured',False))),
                     'status':'ready' if fresh else perception.get('reason','unconfigured'),
                     'model':vision.get('model','qwen3.8-max'),'provenance':(perception.get('last_vision') or {}).get('provenance','none'),
@@ -113,14 +115,16 @@ class SO101Session:
             if self.brain is None:raise ValueError('Brain unavailable; no request sent')
             brain_status=self.brain.status()
             if not brain_status.get('available',brain_status.get('configured',False)):raise ValueError('Brain worker unavailable; no request sent')
-            self.source.snapshot()
+            if not hasattr(self.source,'ensure_brain_scene'):self.source.snapshot()
             self.generation+=1;epoch=self.generation;self.error=None
             self.task={'status':'planning','available':False,'reason':'preview_only','plan':None}
             self.worker=threading.Thread(target=self._preview,args=(epoch,text),daemon=True);self.worker.start()
             return self.state()
     def _preview(self,epoch,text):
         try:
-            result=self.brain.interpret(text,self.source.brain_scene())
+            ensure=getattr(self.source,'ensure_brain_scene',None)
+            scene=ensure() if ensure else self.source.brain_scene()
+            result=self.brain.interpret(text,scene)
             self.source.snapshot()
             if not result.accepted or result.plan is None:raise ValueError('Plan rejected')
             plan=result.plan.to_dict()
@@ -155,19 +159,12 @@ class SO101Session:
             self.task['status']='waypoint_'+result['status']
             if result['status']!='completed':self.error=result.get('reason','waypoint_stopped')
     def camera_pair(self):
-        with self.lock:
-            now=time.monotonic()
-            if self.frames is None or now-self.frames_time>=1:
-                captured=self.sim.capture_frames()
-                # Camera intrinsics/extrinsics are not object oracle data. Display
-                # only the exact paired RGB frames; no depth or segmentation route.
-                self.frames={k:captured[k] for k in ('frame_id','captured_at','images')}
-                self.frames_time=now
-            return self.frames
+        return self.camera.get()
     def control(self,request):
         if request.action=='reset' and not 0<=request.seed<=9999:raise ValueError('Seed must be 0..9999')
         with self.lock:
             self.generation+=1
+            self.camera.invalidate()
             self.source.cancel()
             if self.waypoint_executor:self.waypoint_executor.stop()
             if self.brain and hasattr(self.brain,'cancel'):self.brain.cancel()
@@ -179,13 +176,14 @@ class SO101Session:
                 self.sim.reset(request.seed);self.sim.stop();self.frames=None
             return self.state()
     def close(self):
+        self.camera.close()
         with self.lock:
             self.closed=True;self.generation+=1;self.source.cancel();self.task_service.stop()
             if self.waypoint_executor:self.waypoint_executor.stop()
             if self.brain and hasattr(self.brain,'cancel'):self.brain.cancel()
             self.sim.stop();self.sim.close()
 
-def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None):
+def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None,camera_interval_seconds=1.):
     @asynccontextmanager
     async def lifespan(app):
         factory=sim_factory
@@ -203,7 +201,8 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
             if brain_client is None:
                 from embodied_arm.runtime.brain_ipc import FileBrainBridge
                 brain_client=FileBrainBridge()
-        session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory,task_executor=task_executor,task_executor_factory=task_executor_factory);session.sim.stop();app.state.session=session
+        session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory,task_executor=task_executor,task_executor_factory=task_executor_factory,camera_interval_seconds=camera_interval_seconds);session.sim.stop();app.state.session=session
+        session.camera.start()
         def physics():
             last=time.monotonic();accumulator=0.
             while not session.closed:
@@ -225,7 +224,9 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
     @app.get('/api/state')
     def state():return app.state.session.state()
     @app.get('/api/frames')
-    def frames():return app.state.session.camera_pair()
+    def frames():
+        try:return app.state.session.camera_pair()
+        except ValueError as exc:raise HTTPException(503,detail=str(exc)) from None
     @app.post('/api/waypoint')
     def waypoint(request:WaypointRequest):
         try:return app.state.session.waypoint(request.object_id)
@@ -252,4 +253,5 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
         except ValueError as exc:raise HTTPException(409,detail=str(exc)) from None
     return app
 
-app=create_app(enable_waypoint=os.environ.get('SO101_ENABLE_WAYPOINT')=='1')
+app=create_app(enable_waypoint=os.environ.get('SO101_ENABLE_WAYPOINT')=='1',
+    camera_interval_seconds=float(os.environ.get('SO101_CAMERA_INTERVAL','1')))

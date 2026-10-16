@@ -3,3 +3,4 @@
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#09131e;padding:12px;border-radius:8px;font-size:12px}
 
 #chat-history{max-height:320px;overflow-y:auto}.chat-message{padding:10px 12px;border-radius:8px;background:#192b3e;white-space:pre-wrap;overflow-wrap:anywhere}.chat-message.user{background:#1d4549}
+.composer{margin-top:24px}.actions{flex-wrap:wrap}summary{cursor:pointer;color:#c9e6ee;padding:8px 0}#advanced-diagnostics{border:1px solid #2b3b4e;border-radius:12px;padding:16px;margin-top:16px}#advanced-diagnostics>.layout{margin-top:16px}#execution-readiness,#plan-status{color:#c1d6e6}#structured-plan li,.timeline li{margin:8px 0}#execution-events{max-height:320px;overflow:auto}#workflow-status{font-size:18px;font-weight:600}.composer textarea{min-height:84px}

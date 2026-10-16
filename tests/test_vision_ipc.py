@@ -537,7 +537,7 @@ class VisionIPCTests(unittest.TestCase):
             store.close()
 
     def test_explicit_config_uses_approved_loader_and_never_calls_api(self):
-        with patch('embodied_arm.providers.brain.QwenBrain.from_config', return_value=SimpleNamespace(_api_key='FAKE-TEST-KEY')) as loader:
+        with patch('embodied_arm.providers.brain.QwenBrain.from_config', return_value=SimpleNamespace(_api_key='FAKE-TEST-KEY',timeout=9)) as loader:
             with patch('httpx.Client', side_effect=AssertionError('No API call')):
                 adapter = QwenVision.from_config('/fake/explicit/config', max_calls=3, timeout=9,
                                                  use_environment_network=True)

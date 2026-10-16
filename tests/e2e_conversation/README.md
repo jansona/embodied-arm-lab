@@ -47,3 +47,19 @@ python -m tests.e2e_conversation.serve_fixture --tasks
 ```
 
 These servers bind localhost and must never be deployed. They expose deliberate fake-provider controls, no credentials or model calls. Close them after QA.
+
+## Automatic observation regression (2026-10-16, package-layout branch)
+
+Run the independent HTTP contract checks:
+
+```sh
+python -m pytest -q tests/e2e_conversation/test_auto_observation.py
+python -m tests.e2e_conversation.serve_auto_observation
+# MOCK-only interactive browser fixture: localhost:8770, controls /__qa
+```
+
+Executed: 10 HTTP checks passed against the new automatic-observation implementation. They cover first relevant chat acquiring a scene without manual recognition, unavailable vision blocking brain inference, stale-scene refresh, Stop discarding late observation, reconnect, valid-scene reuse, missing brain configuration, RGB-only preview boundaries, continuous local capture with zero provider calls, and stale/non-motion plan labeling.
+
+Executed through the supported cloud-browser interface: first red-cube instruction with no diagnostic clicks; visible observation/planning/non-motion structured plan; idle Stop disabled and active Stop enabled; stale-plan warning and on-demand refresh; unavailable vision message explicitly says no upload is needed; cancelled observation never produces a late plan; reload/reconnect; offline brain disables Send while preserving the editable draft. Local frame IDs advanced at approximately one second while provider counters stayed unchanged until a request.
+
+These results use MOCK scene and provider contracts, not real image recognition or Qwen/Jev. The image-only boundary was also reviewed in the production source: local sampling strips the packet to RGB frame fields, carries no provider handle, and simulator camera capture is serialized. Full real-provider/physical acceptance is outside this evidence. The Python Playwright runner remains unexecuted in this environment; do not equate authored/collected tests with browser-runner passes.

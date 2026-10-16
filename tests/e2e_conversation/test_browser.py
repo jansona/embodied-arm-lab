@@ -18,15 +18,16 @@ from embodied_arm.providers.brain import BrainPlan, BrainResult
 
 class FakeRobot:
     """No physics or object truth. This suite validates application behavior only."""
-    def __init__(self, seed=0): self.epoch = 0; self.paused = True
+    def __init__(self, seed=0): self.epoch = 0; self.paused = True; self.captures = 0
     def proprioception(self):
         return dict(name='FAKE E2E SO101', joints=[0]*5, ee=[0,0,0],
                     gripper_openness=1, paused=self.paused, busy=False, actions=0)
     def capture_frames(self):
         import base64
-        buf = io.BytesIO(); Image.new('RGB', (32,32), 'gray').save(buf, 'PNG')
-        image = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
-        return dict(frame_id='FAKE-E2E', captured_at=time.monotonic(), images=[
+        self.captures += 1
+        buf = io.BytesIO(); Image.new('RGB', (32,32), 'gray').save(buf, 'JPEG')
+        image = 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+        return dict(frame_id=f'FAKE-E2E-{self.captures}', captured_at=time.monotonic(), images=[
             dict(camera_id=c, data_url=image) for c in ('left','right')])
     def evaluation_state(self): raise AssertionError('Oracle access forbidden')
     def stop(self): self.paused = True
@@ -118,7 +119,7 @@ def send(lab,text='你好'):
 
 def test_text_reply_and_unknown_image_are_honest(lab):
     from playwright.sync_api import expect
-    send(lab,'你看见了什么？')
+    send(lab,'你好')
     wait_status(lab,'ready')
     expect(lab.page.locator('#chat-history')).to_contain_text('没有视觉观察')
     expect(lab.page.locator('#chat-status')).to_contain_text('FAKE-E2E-NOT-LIVE')
@@ -154,17 +155,17 @@ def test_provider_error_is_truthful_and_retry_works(lab):
     lab.brain.fail=True;send(lab);wait_status(lab,'error')
     expect(lab.page.locator('#chat-status')).to_contain_text('没有执行动作')
     expect(lab.page.locator('#chat-history .assistant')).to_have_count(0)
-    lab.brain.fail=False;send(lab,'再试一次');wait_status(lab,'ready')
+    lab.brain.fail=False;send(lab,'你好');wait_status(lab,'ready')
     assert len(lab.brain.calls)==2
     expect(lab.page.locator('#chat-history .assistant')).to_have_count(1)
 
 
 def test_refresh_during_request_recovers_history_without_resubmit(lab):
     from playwright.sync_api import expect
-    lab.brain.gate.clear();send(lab,'刷新前的消息');wait_status(lab,'thinking')
+    lab.brain.gate.clear();send(lab,'你好');wait_status(lab,'thinking')
     lab.page.reload();expect(lab.page.locator('#send')).to_be_disabled()
     lab.brain.gate.set();wait_status(lab,'ready')
-    expect(lab.page.locator('#chat-history')).to_contain_text('刷新前的消息')
+    expect(lab.page.locator('#chat-history')).to_contain_text('你好')
     assert len(lab.brain.calls)==1
 
 
@@ -178,14 +179,15 @@ def test_expired_service_and_reconnect_preserve_draft(lab):
     lab.brain.available=True
     expect(lab.page.locator('#send')).to_be_enabled(timeout=4000)
     expect(lab.page.locator('#request')).to_have_value('恢复连接后发送')
+    lab.page.locator('#request').fill('你好')
     lab.page.locator('#send').click();wait_status(lab,'ready')
 
 
 def test_task_request_does_not_claim_unimplemented_execution(lab):
     """Current safety contract, NOT acceptance of the requested autonomous task feature."""
     from playwright.sync_api import expect
-    send(lab,'夹起红色方块');wait_status(lab,'ready')
-    expect(lab.page.locator('#workflow-status')).to_contain_text('自动执行尚未验证')
+    send(lab,'夹起红色方块');wait_status(lab,'error')
+    expect(lab.page.locator('#execution-readiness')).to_contain_text('自动执行尚未验证')
     expect(lab.page.locator('#task-send')).to_be_disabled()
     expect(lab.page.locator('#plan-send')).to_be_disabled()
     assert lab.app.state.session.sim.proprioception()['actions']==0

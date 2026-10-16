@@ -37,6 +37,18 @@ def package(destination):
             raise ValueError('Unexpected configuration template fields')
         if data.get('api_key') not in ('',None):raise ValueError('Example contains nonempty credential')
         files.append(example)
+    versioned=ROOT/'config/provider-v2.example.json'
+    if versioned.is_symlink():raise ValueError('Unsafe configuration template path')
+    if versioned.exists():
+        data=json.loads(versioned.read_text())
+        if not isinstance(data,dict) or set(data)!={'schema_version','brain','cerebellum'} or data['schema_version']!=2:
+            raise ValueError('Unexpected versioned configuration template fields')
+        for component in ('brain','cerebellum'):
+            group=data[component]
+            if not isinstance(group,dict) or set(group)-{'provider','base_url','model','api_key','timeout','min_confidence'}:
+                raise ValueError('Unexpected provider template fields')
+            if group.get('api_key') not in ('',None):raise ValueError('Example contains nonempty credential')
+        files.append(versioned)
     for name in roots:
         directory=ROOT/name
         if directory.exists():files.extend(p for p in directory.rglob('*') if p.is_file() and include_source(p))

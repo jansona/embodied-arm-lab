@@ -7,6 +7,7 @@ class TaskState(str, Enum):
     QUEUED = 'queued'
     OBSERVING = 'observing'
     PLANNING = 'planning'
+    PLAN_PREVIEW = 'plan_preview'
     EXECUTING = 'executing'
     COMPLETED = 'completed'
     BLOCKED = 'blocked'

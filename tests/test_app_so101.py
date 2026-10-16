@@ -206,12 +206,16 @@ def test_chat_works_without_scene_and_passes_history_without_motion():
         assert s['chat']['status']=='ready' and len(s['chat']['messages'])==2
         assert s['robot']['actions']==0 and not s['chat']['motion_enabled']
         assert brain.requests[0][1]=={'observation_status':'unavailable','blocks':{}}
-        assert c.post('/api/chat',json={'text':'我想夹红色方块'}).status_code==200
+        assert c.post('/api/chat',json={'text':'谢谢'}).status_code==200
         for _ in range(100):
             if len(brain.requests)==2:break
             time.sleep(.01)
         assert [m['role'] for m in brain.requests[1][2]]==['user','assistant']
-        assert c.post('/api/plan',json={'text':'夹红色方块'}).status_code==409
+        assert c.post('/api/plan',json={'text':'夹红色方块'}).status_code==200
+        for _ in range(100):
+            if c.get('/api/state').json()['task']['status']=='failed':break
+            time.sleep(.01)
+        assert len(brain.requests)==2
 
 
 def test_chat_pending_cancel_and_expired_worker_are_safe():
@@ -227,7 +231,7 @@ def test_chat_pending_cancel_and_expired_worker_are_safe():
         def cancel(self):pass
     brain=Brain()
     with TestClient(create_app(SafeSimulation,brain=brain)) as c:
-        c.post('/api/chat',json={'text':'状态'})
+        c.post('/api/chat',json={'text':'你好'})
         assert c.post('/api/chat',json={'text':'重复'}).status_code==409
         c.post('/api/control',json={'action':'stop'});gate.set();time.sleep(.03)
         s=c.get('/api/state').json()
@@ -263,7 +267,7 @@ def test_one_text_task_observes_plans_executes_and_reports_verified_outcome():
         def status(self):return {'scene':None,'reason':'none'}
         def refresh(self):trace.append('observe')
         def brain_scene(self):return {'perception_source':'rgb_only'}
-        def snapshot(self):trace.append('fresh')
+        def snapshot(self):trace.append('fresh');return {}
         def cancel(self):pass
     class Brain:
         def status(self):return {'available':True}
@@ -282,7 +286,8 @@ def test_one_text_task_observes_plans_executes_and_reports_verified_outcome():
             state=c.get('/api/state').json()
             if state['workflow']['state']=='completed':break
             time.sleep(.01)
-        assert trace==['observe','plan','fresh','execute']
+        assert [x for x in trace if x!='fresh']==['observe','plan','execute']
+        assert trace.count('fresh')>=2
         assert state['workflow']['outcome']['verified']
         assert [e['state'] for e in state['workflow']['events']]==['observing','planning','executing','executing','completed']
         assert state['workflow']['provenance']=='mock'

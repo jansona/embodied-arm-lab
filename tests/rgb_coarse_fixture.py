@@ -15,6 +15,7 @@ from embodied_arm.providers.vision_adapter import VisionResult
 
 
 class RGBColourFixture:
+    def status(self):return {'available':True,'model':'offline-colour-fixture','provenance':'offline_fixture'}
     def __init__(self, *, profile='baseline'):
         self.profile = profile
 

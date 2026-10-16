@@ -159,9 +159,9 @@ class SO101JevTests(unittest.TestCase):
             self.assertEqual(len(calls),1);self.assertEqual(result.reason,reason);self.assertIsNone(result.action)
     def test_explicit_config_loader_is_mocked_preserves_threshold_and_never_calls(self):
         # No real config path is opened. Only the established loader is mocked.
-        with patch('embodied_arm.legacy.panda.runner.JevRunner') as loader, patch('embodied_arm.providers.so101_jev.httpx.Client') as client:
-            loader.return_value._adapter=SimpleNamespace(_api_key='mock-only-placeholder',endpoint=ALIYUN_ENDPOINT,
-                                                         model=ALIYUN_MODEL,min_confidence=.8)
+        with patch('embodied_arm.providers.configuration.load_configuration') as loader, patch('embodied_arm.providers.so101_jev.httpx.Client') as client:
+            loader.return_value={'cerebellum':SimpleNamespace(component='cerebellum',api_key='mock-only-placeholder',endpoint=ALIYUN_ENDPOINT,
+                                                         model=ALIYUN_MODEL,min_confidence=.8,timeout=15)}
             with SO101JevAdapter.from_config('/fake-explicit-path',use_environment_network=True) as adapter:
                 self.assertEqual(adapter.min_confidence,.8)
                 self.assertEqual(adapter.calls,0)
@@ -169,9 +169,9 @@ class SO101JevTests(unittest.TestCase):
                 self.assertNotIn('mock-only-placeholder',json.dumps(adapter.status()))
                 client.return_value.stream.assert_not_called()
                 self.assertTrue(client.call_args.kwargs['trust_env'])
-            loader.return_value.configure.assert_called_once_with('/fake-explicit-path')
-        with patch('embodied_arm.legacy.panda.runner.JevRunner') as loader:
-            loader.return_value.configure.side_effect=ValueError('SECRET-config-error')
+            loader.assert_called_once_with('/fake-explicit-path',component='cerebellum')
+        with patch('embodied_arm.providers.configuration.load_configuration') as loader:
+            loader.side_effect=ValueError('SECRET-config-error')
             with self.assertRaisesRegex(ValueError,'approved external') as error:
                 SO101JevAdapter.from_config('/fake-explicit-path')
             self.assertNotIn('SECRET',str(error.exception))

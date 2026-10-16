@@ -325,7 +325,7 @@ def validate_detections(payload, frame, *, min_confidence=.75, max_uncertainty_p
 
 class QwenVision:
     @classmethod
-    def from_config(cls, path, *, max_calls=6, timeout=30, use_environment_network=False):
+    def from_config(cls, path, *, max_calls=6, timeout=None, use_environment_network=False):
         """Explicit server-only loader; reuse the established approved credential.
 
         The normal brain loader validates the external path and fixed Aliyun
@@ -335,7 +335,7 @@ class QwenVision:
         from embodied_arm.providers.brain import QwenBrain
         approved = QwenBrain.from_config(path, max_calls=max_calls, timeout=timeout,
                                         use_environment_network=use_environment_network)
-        return cls(api_key=approved._api_key, max_calls=max_calls, timeout=timeout,
+        return cls(api_key=approved._api_key, max_calls=max_calls, timeout=approved.timeout,
                    use_environment_network=use_environment_network)
 
     def __init__(self, *, api_key, timeout=30, max_calls=10, max_frame_age=60,

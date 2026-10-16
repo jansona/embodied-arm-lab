@@ -366,34 +366,15 @@ class QwenBrain:
         self.replans = 0
 
     @classmethod
-    def from_config(cls, path, *, max_calls=10, timeout=30, use_environment_network=False):
-        """Explicitly load the same approved external Jev credential, no API call.
-
-        Only trusted server/CLI code may choose path. Never accept browser or
-        model-supplied paths. Provider/model/endpoint are validated, then only
-        the credential is reused for this class's fixed qwen3.8-max destination.
-        """
+    def from_config(cls, path, *, max_calls=10, timeout=None, use_environment_network=False):
+        """Load the brain section (or legacy in-memory mapping), without requests."""
+        from embodied_arm.providers.configuration import load_configuration,request_timeout
         try:
-            if not isinstance(path, (str, Path)) or not str(path).strip():
-                raise ValueError('Missing path')
-            config_path = Path(path).expanduser().resolve()
-            project = CONFIG_EXCLUSION_ROOT
-            if config_path == project or project in config_path.parents:
-                raise ValueError('Configuration must remain outside the project')
-            with config_path.open('rb') as file:
-                raw = file.read(16385)
-            if len(raw) > 16384:
-                raise ValueError('Configuration is too large')
-            config = _loads(raw)
-            if not isinstance(config, dict) or set(config) - {'provider', 'endpoint', 'model', 'api_key', 'min_confidence', 'timeout'}:
-                raise ValueError('Invalid configuration')
-            if (config.get('provider') != 'aliyun_bailian'
-                    or config.get('endpoint') != BASE_URL + '/systemone'
-                    or config.get('model') != 'decision-model-preview'):
-                raise ValueError('Unexpected provider')
-            return cls(api_key=config.get('api_key'), max_calls=max_calls, timeout=timeout,
-                       use_environment_network=use_environment_network)
-        except (OSError, ValueError, TypeError, RecursionError):
+            settings=load_configuration(path,component='brain')['brain']
+            bounded_timeout=request_timeout(settings,timeout)
+            return cls(api_key=settings.api_key,endpoint=settings.endpoint,model=settings.model,
+                max_calls=max_calls,timeout=bounded_timeout,use_environment_network=use_environment_network)
+        except (OSError,ValueError,TypeError,RecursionError):
             raise ValueError('Cannot load the approved external Aliyun configuration') from None
 
     def status(self):
