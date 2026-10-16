@@ -5,7 +5,7 @@ import threading
 import httpx
 import pytest
 
-from brain import (BrainPlan, ENDPOINT, MODEL, MockBrain, QwenBrain,
+from embodied_arm.providers.brain import (BrainPlan, ENDPOINT, MODEL, MockBrain, QwenBrain,
                    request_preview, validate_plan)
 
 SCENE = {'blocks': {'red': [.5, 0, .025], 'blue': [.58, -.19, .025]},
@@ -152,7 +152,7 @@ def test_mock_is_explicit_and_not_general_language_fallback():
 
 
 def test_explicit_loader_fake_external_config_only(tmp_path):
-    from brain import BASE_URL
+    from embodied_arm.providers.brain import BASE_URL
     path = tmp_path/'fake-config.json'
     config = {'provider':'aliyun_bailian','endpoint':BASE_URL+'/systemone',
               'model':'decision-model-preview','api_key':'fake-test-key'}
@@ -174,7 +174,7 @@ def test_loader_rejects_repository_path_without_loading():
 
 
 def test_elapsed_deadline_discards_delayed_success(monkeypatch):
-    import brain as module
+    import embodied_arm.providers.brain as module
     times=iter([0,2])
     monkeypatch.setattr(module.time,'monotonic',lambda:next(times,2))
     result=adapter(timeout=1).interpret('test',SCENE)

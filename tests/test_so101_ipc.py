@@ -10,11 +10,11 @@ import time
 import unittest
 from unittest.mock import patch
 import httpx
-from adapters import ALIYUN_ENDPOINT, ALIYUN_MODEL
-from so101_jev import SO101Decision, SO101JevAdapter, build_observation, parse_response, validate_observation
-from so101_ipc import (FileSO101Bridge, SO101Store, REQUEST_SCHEMA, RESULT_SCHEMA,
+from embodied_arm.providers.adapters import ALIYUN_ENDPOINT, ALIYUN_MODEL
+from embodied_arm.providers.so101_jev import SO101Decision, SO101JevAdapter, build_observation, parse_response, validate_observation
+from embodied_arm.runtime.so101_ipc import (FileSO101Bridge, SO101Store, REQUEST_SCHEMA, RESULT_SCHEMA,
                       observation_hash, validate_job, worker_status)
-from so101_worker import main, worker_run
+from embodied_arm.runtime.so101_worker import main, worker_run
 
 MP = multiprocessing.get_context('fork')
 
@@ -64,7 +64,7 @@ class SO101IPCTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / '.runtime' / 'so101-jev-ipc'
-        self.patcher = patch('so101_ipc.SO101_IPC_ROOT', self.root)
+        self.patcher = patch('embodied_arm.runtime.so101_ipc.SO101_IPC_ROOT', self.root)
         self.patcher.start()
         self.threads = []
 
@@ -102,6 +102,43 @@ class SO101IPCTests(unittest.TestCase):
         try: store.write(job + '.job', data)
         finally: store.close()
         return job
+
+    def test_atomic_ready_replacement_reopens_unlinked_snapshot(self):
+        store = SO101Store()
+        store.write('ready.json', {'version': 1})
+        original = os.fstat
+        unlinked_counts = []
+        def replace_after_open(fd):
+            if not unlinked_counts:
+                store.write('ready.json', {'version': 2})
+                info = original(fd)
+                unlinked_counts.append(info.st_nlink)
+                return info
+            return original(fd)
+        try:
+            with patch('embodied_arm.runtime.so101_ipc.os.fstat', side_effect=replace_after_open):
+                self.assertEqual(store.read('ready.json'), {'version': 2})
+            self.assertEqual(unlinked_counts, [0])
+        finally:
+            store.close()
+
+    def test_atomic_ready_retry_is_bounded_and_never_accepts_unlinked_inode(self):
+        store = SO101Store()
+        store.write('ready.json', {'version': 1})
+        original = os.fstat
+        attempts = []
+        def replace_every_open(fd):
+            store.write('ready.json', {'version': len(attempts) + 2})
+            info = original(fd)
+            attempts.append(info.st_nlink)
+            return info
+        try:
+            with patch('embodied_arm.runtime.so101_ipc.os.fstat', side_effect=replace_every_open):
+                with self.assertRaisesRegex(ValueError, 'Unsafe SO101 IPC file'):
+                    store.read('ready.json')
+            self.assertEqual(attempts, [0, 0])
+        finally:
+            store.close()
 
     def test_two_roundtrips_use_one_pooled_child(self):
         adapter, worker, done = self.start_worker(calls=2)
@@ -196,7 +233,7 @@ class SO101IPCTests(unittest.TestCase):
         def slow(obs):
             entered.set(); release.wait(1)
             return validate_observation(obs)
-        with patch('so101_ipc.validate_observation', side_effect=slow):
+        with patch('embodied_arm.runtime.so101_ipc.validate_observation', side_effect=slow):
             client = threading.Thread(target=lambda: results.append(bridge.decide(observation())))
             client.start()
             self.assertTrue(entered.wait(1))
@@ -268,7 +305,7 @@ class SO101IPCTests(unittest.TestCase):
                     'result': parse_response(answer(), data['observation']).to_dict()})
             finally: store.close()
         thread = threading.Thread(target=forge); thread.start()
-        with patch('so101_ipc.worker_status', return_value={'available': True, 'remaining_calls': 1}):
+        with patch('embodied_arm.runtime.so101_ipc.worker_status', return_value={'available': True, 'remaining_calls': 1}):
             result = FileSO101Bridge().decide(observation())
         thread.join(1)
         self.assertEqual(result.reason, 'invalid_response')

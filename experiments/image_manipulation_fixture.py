@@ -6,14 +6,13 @@ Run from repository root: python -m experiments.image_manipulation_fixture
 import json
 import sys
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'tests'))
-from so101_simulation import SO101Simulation
-from so101_control import CameraSceneSource
-from rgb_coarse_fixture import RGBColourFixture
-from test_jev_motion import FakeJev
-from embodied_arm.jev_motion import JevMotionDriver
-from embodied_arm.phase_observer import PhaseSceneObserver
-from embodied_arm.manipulation import VisualManipulationExecutor
+from embodied_arm.simulation.so101_simulation import SO101Simulation
+from embodied_arm.control.so101_control import CameraSceneSource
+from tests.rgb_coarse_fixture import RGBColourFixture
+from tests.test_jev_motion import FakeJev
+from embodied_arm.control.jev_motion import JevMotionDriver
+from embodied_arm.perception.phase_observer import PhaseSceneObserver
+from embodied_arm.control.manipulation import VisualManipulationExecutor
 
 def run():
     sim=SO101Simulation(seed=0,camera_size=(1920,1440),illumination_profile='shadow_free_rgb_v1')

@@ -8,10 +8,10 @@ from pathlib import Path
 from PIL import Image
 import pytest
 
-from camera_perception import PixelDetection
-from rgb_face_refinement import FaceRefinement, RefinedPacket, SOURCE
-import rgb_region_tracker as tracker_module
-from rgb_region_tracker import RGBRegionTracker, TRACKED_SOURCE
+from embodied_arm.perception.camera_perception import PixelDetection
+from embodied_arm.perception.rgb_face_refinement import FaceRefinement, RefinedPacket, SOURCE
+import embodied_arm.perception.rgb_region_tracker as tracker_module
+from embodied_arm.perception.rgb_region_tracker import RGBRegionTracker, TRACKED_SOURCE
 
 
 def jpeg_url():

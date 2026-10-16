@@ -1,8 +1,8 @@
 import json
 import httpx
 import pytest
-from adapters import JevAdapter
-from microcontrol_experiment import MicroController,make_body
+from embodied_arm.providers.adapters import JevAdapter
+from embodied_arm.legacy.panda.microcontrol_experiment import MicroController,make_body
 
 def response(choice='x_plus',confidence=.9,probabilities=None):
     return httpx.Response(200,json={'answers':{'action':{'type':'choice','choice':choice,'confidence':confidence,'probabilities':probabilities or {'x_plus':.9,'x_minus':.05,'hold':.05}}}})
@@ -37,7 +37,7 @@ def test_rejects_uncertain_or_invalid(payload):
     finally:c.close()
 
 def test_exclusive_inside_tolerance_criteria_and_multi_axis_rejection():
-    from microcontrol_experiment import XMicroAdapter
+    from embodied_arm.legacy.panda.microcontrol_experiment import XMicroAdapter
     body=make_body('jev-latest',[.4501,0,.3],[.45,0,.3],distance_band=True)
     assert body['state']['measured_distance_band']=='inside_tolerance'
     assert 'outside_tolerance' in body['questions']['action']['criteria']['x_plus']
@@ -52,7 +52,7 @@ def test_exclusive_inside_tolerance_criteria_and_multi_axis_rejection():
 
 @pytest.mark.parametrize('axis',list('xyz'))
 def test_all_axes_real_model_action_boundary(axis):
-    from microcontrol_experiment import make_axis_body
+    from embodied_arm.legacy.panda.microcontrol_experiment import make_axis_body
     i='xyz'.index(axis);current=[.45,0,.3];target=current[:];target[i]+=.02
     body=make_axis_body('jev-latest',current,target,axis)
     keys={axis+'_plus',axis+'_minus','hold'}
@@ -68,9 +68,9 @@ def test_all_axes_real_model_action_boundary(axis):
 
 def test_phased_model_mock_physical_pick():
     import time
-    from simulator import Simulation
-    from task_executor import TaskExecutor,plan_from_intent
-    from microcontrol_experiment import PhasedMicroAdapter
+    from embodied_arm.simulation.simulator import Simulation
+    from embodied_arm.legacy.panda.task_executor import TaskExecutor,plan_from_intent
+    from embodied_arm.legacy.panda.microcontrol_experiment import PhasedMicroAdapter
     seen=[]
     def handler(request):
         body=json.loads(request.content);state=body['state'];choices=body['questions']['action']['criteria'];seen.append(state)
@@ -94,7 +94,7 @@ def test_phased_model_mock_physical_pick():
 
 @pytest.mark.parametrize('width,target,current_gap,target_gap',[(.08,'open','wide','wide'),(.08,'closed','wide','narrow'),(.05,'open','narrow','wide'),(.05,'closed','narrow','narrow')])
 def test_gripper_transition_has_all_choices_and_observed_state(width,target,current_gap,target_gap):
-    from microcontrol_experiment import PhasedMicroAdapter
+    from embodied_arm.legacy.panda.microcontrol_experiment import PhasedMicroAdapter
     seen=[]
     def handler(request):
         body=json.loads(request.content);seen.append(body)

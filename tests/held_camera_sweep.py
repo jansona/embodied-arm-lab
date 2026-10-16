@@ -2,12 +2,12 @@
 import json
 import math
 from pathlib import Path
-from camera_perception import CameraCalibration
-import so101_simulation as simulation
-from so101_control import CameraSceneSource
-from rgb_scaled_refinement import refine_rgb_landmark
-from rgb_coarse_fixture import RGBColourFixture
-from test_so101_grasp_feasibility import _fixture_move,_settle
+from embodied_arm.perception.camera_perception import CameraCalibration
+import embodied_arm.simulation.so101_simulation as simulation
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.perception.rgb_scaled_refinement import refine_rgb_landmark
+from tests.rgb_coarse_fixture import RGBColourFixture
+from tests.test_so101_grasp_feasibility import _fixture_move,_settle
 
 
 def run(name='blue'):

@@ -8,8 +8,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 import pytest
 
-import rgb_face_refinement as baseline
-import rgb_scaled_refinement as scaled
+import embodied_arm.perception.rgb_face_refinement as baseline
+import embodied_arm.perception.rgb_scaled_refinement as scaled
 
 TOP = [(300,210),(316,200),(333,212),(316,223)]
 

@@ -1,8 +1,8 @@
 import copy
 import pytest
-from test_so101_control import SafeFake,Vision
-from so101_control import CameraSceneSource
-from so101_visual_feedback import verify_visual_lift
+from tests.test_so101_control import SafeFake,Vision
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.perception.so101_visual_feedback import verify_visual_lift
 
 def observations():
     sim=SafeFake();source=CameraSceneSource(sim,Vision(sim),clock=lambda:sim.now+.1)

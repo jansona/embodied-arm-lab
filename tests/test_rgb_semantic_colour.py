@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from rgb_semantic_colour import semantic_colour_mask
+from embodied_arm.perception.rgb_semantic_colour import semantic_colour_mask
 
 
 @pytest.mark.parametrize('name,rgb', [('red',[210,24,24]),('blue',[24,70,225]),('goal',[18,195,55]),

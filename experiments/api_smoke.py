@@ -1,6 +1,6 @@
 """Normal application CLI: one saved-credential API check, no robot simulation."""
 import argparse,json,threading
-from runner import JevRunner
+from embodied_arm.legacy.panda.runner import JevRunner
 
 class NoRobot:
     lock=threading.RLock()

@@ -1,8 +1,8 @@
 """Synthetic contract fixtures; these tests do not claim physical grasp success."""
 from dataclasses import replace
 import pytest
-from camera_perception import EstimatedScene, ObjectEstimate, PixelDetection, LANDMARKS
-from embodied_arm.visual_feedback import VisualObservation, VisualPhaseVerifier
+from embodied_arm.perception.camera_perception import EstimatedScene, ObjectEstimate, PixelDetection, LANDMARKS
+from embodied_arm.perception.visual_feedback import VisualObservation, VisualPhaseVerifier
 
 
 def observation(t=1., z=.02, tcp_z=.02, sigma=.0005, **kwargs):
@@ -93,8 +93,8 @@ def test_release_requires_dwell():
 
 
 def dynamic_fixture(shift=0, t=1., duplicate=False):
-    from camera_perception import CameraCalibration, RGBFrame
-    from test_rgb_face_refinement import image_bytes, TOP
+    from embodied_arm.perception.camera_perception import CameraCalibration, RGBFrame
+    from tests.test_rgb_face_refinement import image_bytes, TOP
     raw = image_bytes(top=[(x+shift, y) for x, y in TOP], duplicate=duplicate)
     frames = []
     for cam in ('left', 'right'):
@@ -106,7 +106,7 @@ def dynamic_fixture(shift=0, t=1., duplicate=False):
 
 
 def test_dynamic_rgb_tracks_real_shift_beyond_static_four_pixel_gate():
-    from embodied_arm.visual_feedback import DynamicRGBPhaseTracker
+    from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker
     first = observation()
     first = replace(first, detections=tuple(replace(d, uv=(316.,212.)) for d in first.detections))
     tracker = DynamicRGBPhaseTracker()
@@ -118,7 +118,7 @@ def test_dynamic_rgb_tracks_real_shift_beyond_static_four_pixel_gate():
 
 
 def test_dynamic_rgb_does_not_return_encoder_prediction_on_slip():
-    from embodied_arm.visual_feedback import DynamicRGBPhaseTracker
+    from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker
     first = observation()
     first = replace(first, detections=tuple(replace(d, uv=(316.,212.)) for d in first.detections))
     tracker = DynamicRGBPhaseTracker()
@@ -128,7 +128,7 @@ def test_dynamic_rgb_does_not_return_encoder_prediction_on_slip():
 
 
 def test_dynamic_rgb_rejects_duplicate_same_colour_object():
-    from embodied_arm.visual_feedback import DynamicRGBPhaseTracker
+    from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker
     first = observation()
     first = replace(first, detections=tuple(replace(d, uv=(316.,212.)) for d in first.detections))
     tracker = DynamicRGBPhaseTracker()
@@ -138,7 +138,7 @@ def test_dynamic_rgb_rejects_duplicate_same_colour_object():
 
 
 def test_closure_rejects_replayed_frames_and_does_not_claim_grasp():
-    from embodied_arm.visual_feedback import DynamicRGBPhaseTracker
+    from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker
     first=observation()
     first=replace(first,detections=tuple(replace(d,uv=(316.,212.)) for d in first.detections))
     tracker=DynamicRGBPhaseTracker()
@@ -150,7 +150,7 @@ def test_closure_rejects_replayed_frames_and_does_not_claim_grasp():
 
 
 def test_closure_rejects_transport_disguised_as_jaw_closing():
-    from embodied_arm.visual_feedback import DynamicRGBPhaseTracker
+    from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker
     first=observation()
     first=replace(first,detections=tuple(replace(d,uv=(316.,212.)) for d in first.detections))
     tracker=DynamicRGBPhaseTracker()

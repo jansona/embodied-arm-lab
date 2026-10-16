@@ -10,14 +10,14 @@ import math
 from pathlib import Path
 import time
 import numpy as np
-import so101_simulation as simulation
-from camera_perception import CameraCalibration,RGBFrame,estimate_scene,PerceptionConfig,PixelDetection,LANDMARKS
-from so101_control import CameraSceneSource,OBSERVATION_VOLUME
-from rgb_roi_geometry import bounds_from_detections
-from rgb_scaled_refinement import refine_packet
-from rgb_coarse_fixture import RGBColourFixture
-from test_so101_grasp_feasibility import _fixture_move,_settle
-from embodied_arm.visual_feedback import VisualObservation,DynamicRGBPhaseTracker,VisualPhaseVerifier
+import embodied_arm.simulation.so101_simulation as simulation
+from embodied_arm.perception.camera_perception import CameraCalibration,RGBFrame,estimate_scene,PerceptionConfig,PixelDetection,LANDMARKS
+from embodied_arm.control.so101_control import CameraSceneSource,OBSERVATION_VOLUME
+from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
+from embodied_arm.perception.rgb_scaled_refinement import refine_packet
+from tests.rgb_coarse_fixture import RGBColourFixture
+from tests.test_so101_grasp_feasibility import _fixture_move,_settle
+from embodied_arm.perception.visual_feedback import VisualObservation,DynamicRGBPhaseTracker,VisualPhaseVerifier
 
 FRONT_CAMERAS={'left':((.44,-.30,.39),(.20,0.,.035)),
                'right':((.44,.30,.39),(.20,0.,.035))}

@@ -7,10 +7,10 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
-from adapters import ACTIONS, Decision
-import ipc
-from ipc import FileBridgeAdapter, Store, normalize_state, worker_status
-from inference_worker import worker_run
+from embodied_arm.providers.adapters import ACTIONS, Decision
+import embodied_arm.runtime.ipc as ipc
+from embodied_arm.runtime.ipc import FileBridgeAdapter, Store, normalize_state, worker_status
+from embodied_arm.runtime.inference_worker import worker_run
 
 
 def state():
@@ -33,7 +33,7 @@ class IPCTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
         self.root=Path(self.temp.name)/'.runtime'/'jev-ipc'
-        self.patch=patch('ipc.IPC_ROOT',self.root);self.patch.start()
+        self.patch=patch('embodied_arm.runtime.ipc.IPC_ROOT',self.root);self.patch.start()
     def tearDown(self):self.patch.stop();self.temp.cleanup()
     def job(self,job='a'*32,payload=None):
         store=Store()
@@ -139,7 +139,7 @@ class IPCTests(unittest.TestCase):
         adapter=MockAdapter();result=worker_run(adapter,max_seconds=.05)
         self.assertEqual(adapter.calls,0);self.assertEqual(result['rejected'],1)
         alternate=Path(self.temp.name)/'link';alternate.symlink_to(self.root,target_is_directory=True)
-        with patch('ipc.IPC_ROOT',alternate),self.assertRaises(ValueError):Store()
+        with patch('embodied_arm.runtime.ipc.IPC_ROOT',alternate),self.assertRaises(ValueError):Store()
     def test_worker_window_and_ready_status(self):
         adapter=MockAdapter();results=[]
         thread=threading.Thread(target=lambda:results.append(worker_run(adapter,max_seconds=.15)))
@@ -157,7 +157,7 @@ class IPCTests(unittest.TestCase):
     def test_bridge_timeout_without_waiting_ten_seconds(self):
         real=time.monotonic;started=real()
         def accelerated():return started+(real()-started)*1000
-        with patch('ipc.time.monotonic',side_effect=accelerated):
+        with patch('embodied_arm.runtime.ipc.time.monotonic',side_effect=accelerated):
             result=FileBridgeAdapter().decide(state())
         self.assertEqual(result.reason,'timeout');self.assertTrue(list(self.root.glob('*.cancel')))
     def test_pending_request_does_not_extend_worker_deadline(self):

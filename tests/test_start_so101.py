@@ -1,10 +1,10 @@
 import sys
 import pytest
-from start_so101 import ROOT, commands
+from embodied_arm.runtime.start_so101 import ROOT, commands
 
 
 def test_preview_starts_only_loopback_server():
-    assert commands() == [[sys.executable, '-m', 'uvicorn', 'app_so101:app',
+    assert commands() == [[sys.executable, '-m', 'uvicorn', 'embodied_arm.web.app_so101:app',
                            '--host', '127.0.0.1', '--port', '8766']]
 
 
@@ -13,7 +13,7 @@ def test_live_is_explicit_and_bounded(tmp_path):
     jobs = commands(live=True, config=config)
     assert len(jobs) == 4
     assert jobs[1:] == commands(live=True, config=config, workers_only=True)
-    assert [job[1] for job in jobs[1:]] == ['brain_worker.py', 'vision_worker.py', 'so101_worker.py']
+    assert [job[1:3] for job in jobs[1:]] == [['-m', 'embodied_arm.runtime.' + name] for name in ['brain_worker', 'vision_worker', 'so101_worker']]
     assert [job[-4:] for job in jobs[1:]] == [
         ['--max-calls', '6', '--max-seconds', '600'],
         ['--max-calls', '6', '--max-seconds', '600'],
@@ -32,7 +32,7 @@ def test_invalid_launch_is_rejected_before_process_start(kwargs):
 
 
 def test_failed_worker_closes_started_processes(monkeypatch, tmp_path):
-    import start_so101
+    import embodied_arm.runtime.start_so101 as start_so101
     children = []
     class Child:
         def __init__(self, job, **kwargs):
@@ -56,7 +56,7 @@ def test_failed_worker_closes_started_processes(monkeypatch, tmp_path):
 
 
 def test_partial_start_failure_closes_prior_process(monkeypatch):
-    import start_so101
+    import embodied_arm.runtime.start_so101 as start_so101
     children = []
     class Child:
         def __init__(self, job, **kwargs):
@@ -78,7 +78,7 @@ def test_partial_start_failure_closes_prior_process(monkeypatch):
 
 
 def test_workers_only_expiry_does_not_restart(monkeypatch, tmp_path):
-    import start_so101
+    import embodied_arm.runtime.start_so101 as start_so101
     children = []
     class Child:
         def __init__(self, *args, **kwargs):

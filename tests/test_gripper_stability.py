@@ -1,7 +1,7 @@
 """Focused regression for the Panda's physical jaw mimic linkage, offline."""
 import math
 import pybullet as p
-from simulator import Simulation
+from embodied_arm.simulation.simulator import Simulation
 from experiments.gripper_stability_diagnostic import run
 
 

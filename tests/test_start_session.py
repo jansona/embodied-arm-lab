@@ -1,4 +1,4 @@
-from start_session import commands
+from embodied_arm.runtime.start_session import commands
 
 def test_session_is_fixed_local_and_explicitly_bounded():
     all_jobs=commands();workers=commands(True)

@@ -9,11 +9,11 @@ from unittest.mock import patch
 from PIL import Image, ImageDraw
 import pytest
 
-from camera_perception import PixelDetection
-from rgb_coarse_packet import (JPEG_PREFIX, PixelScale, prepare_coarse_packet,
+from embodied_arm.perception.camera_perception import PixelDetection
+from embodied_arm.perception.rgb_coarse_packet import (JPEG_PREFIX, PixelScale, prepare_coarse_packet,
                                remap_detections, remap_result)
-from vision_adapter import VisionResult, frame_snapshot
-from vision_ipc import normalize_packet
+from embodied_arm.providers.vision_adapter import VisionResult, frame_snapshot
+from embodied_arm.runtime.vision_ipc import normalize_packet
 
 
 def make_packet(sizes=((1920, 1440), (1920, 1440)), *, mode='RGB', fmt='JPEG'):
@@ -45,7 +45,7 @@ def test_high_resolution_downsample_preserves_frame_and_passes_existing_boundary
     assert [(i['width'],i['height']) for i in coarse['images']]==[(960,720),(960,720)]
     assert all(i['data_url']!=n['data_url'] for i,n in zip(coarse['images'],native['images']))
     assert frame_snapshot(coarse,now=100.)==coarse
-    with patch('vision_adapter.time.monotonic',return_value=100.):
+    with patch('embodied_arm.providers.vision_adapter.time.monotonic',return_value=100.):
         assert normalize_packet(coarse)==coarse
     assert len(json.dumps(coarse))<1024*1024
     with Image.open(BytesIO(base64.b64decode(coarse['images'][0]['data_url'][len(JPEG_PREFIX):]))) as image:
@@ -171,5 +171,5 @@ def test_invalid_or_unbounded_native_rgb_is_rejected(kind):
 
 def test_model_byte_limit_is_not_silently_relaxed():
     native=make_packet(((640,480),(640,480)))
-    with patch('rgb_coarse_packet.MAX_MODEL_PACKET_BYTES',100):
+    with patch('embodied_arm.perception.rgb_coarse_packet.MAX_MODEL_PACKET_BYTES',100):
         with pytest.raises(ValueError):prepare_coarse_packet(native,now=100.)

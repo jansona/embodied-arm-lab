@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import time
 from PIL import Image
 import pytest
-from camera_perception import CameraCalibration,PixelDetection
-from so101_simulation import camera_calibration
-from so101_control import CameraSceneSource,ground_symbolic
+from embodied_arm.perception.camera_perception import CameraCalibration,PixelDetection
+from embodied_arm.simulation.so101_simulation import camera_calibration
+from embodied_arm.control.so101_control import CameraSceneSource,ground_symbolic
 
 class SafeFake:
     def __init__(self):
@@ -71,12 +71,12 @@ def test_ground_truth_schema_never_accepted_by_target_resolver():
     with pytest.raises(ValueError):ground_symbolic({'action':'pick','object_id':'red'},{'schema':'evaluation-oracle-v1','ground_truth_objects':{'red':[.2,0,.02]}})
 
 def test_hybrid_receives_only_rgb_and_canonical_detections(monkeypatch):
-    import rgb_face_refinement
+    import embodied_arm.perception.rgb_face_refinement as rgb_face_refinement
     seen={}
     def refine(packet,detections):
         seen.update(packet=packet,detections=detections)
         return SimpleNamespace(accepted=True,reason='refined',source='hybrid_qwen_region_rgb_geometry',detections=detections,evidence=())
-    import rgb_region_tracker
+    import embodied_arm.perception.rgb_region_tracker as rgb_region_tracker
     class Tracker:
         def start(self,packet,detections,epoch,now=None,required_objects=None):return refine(packet,detections)
         def clear(self):pass
@@ -90,8 +90,8 @@ def test_hybrid_receives_only_rgb_and_canonical_detections(monkeypatch):
     assert source.status()['last_vision']['base_detector_provenance']=='unverified_fixture'
 
 def test_failed_hybrid_has_no_coarse_detection_fallback(monkeypatch):
-    import rgb_face_refinement
-    import rgb_region_tracker
+    import embodied_arm.perception.rgb_face_refinement as rgb_face_refinement
+    import embodied_arm.perception.rgb_region_tracker as rgb_region_tracker
     class Tracker:
         def start(self,*args,**kwargs):return SimpleNamespace(accepted=False,reason='ambiguous',source='hybrid_qwen_region_rgb_geometry',detections=(),evidence=())
         def clear(self):pass

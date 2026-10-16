@@ -1,8 +1,7 @@
 """Local-only fake provider server for supported interactive browser QA; no real models."""
 import sys
 from pathlib import Path
-sys.path.insert(0,str(Path(__file__).resolve().parent))
-from test_browser import FakeRobot,FakeBrain,FakeTaskSource,FakeTaskExecutor,create_app
+from tests.e2e_conversation.test_browser import FakeRobot,FakeBrain,FakeTaskSource,FakeTaskExecutor,create_app
 from fastapi.responses import HTMLResponse,RedirectResponse
 import uvicorn
 brain=FakeBrain()

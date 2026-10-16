@@ -8,8 +8,8 @@ import numpy as np
 from PIL import Image, ImageDraw
 import pytest
 
-from camera_perception import PixelDetection
-from rgb_face_refinement import SOURCE, refine_rgb_landmark, refine_packet
+from embodied_arm.perception.camera_perception import PixelDetection
+from embodied_arm.perception.rgb_face_refinement import SOURCE, refine_rgb_landmark, refine_packet
 
 
 WIDTH, HEIGHT = 640, 480

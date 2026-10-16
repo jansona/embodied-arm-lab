@@ -2,8 +2,8 @@
 from copy import deepcopy
 from types import SimpleNamespace
 import pytest
-from camera_perception import EstimatedScene, ObjectEstimate
-from embodied_arm.landmark_memory import FixedGoalMemory
+from embodied_arm.perception.camera_perception import EstimatedScene, ObjectEstimate
+from embodied_arm.perception.landmark_memory import FixedGoalMemory
 
 
 class CalibrationFixture:

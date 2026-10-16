@@ -8,7 +8,7 @@ from PIL import Image
 import pybullet as p
 import pytest
 
-from so101_simulation import CAMERAS, SO101Simulation, camera_calibration
+from embodied_arm.simulation.so101_simulation import CAMERAS, SO101Simulation, camera_calibration
 
 
 @pytest.fixture

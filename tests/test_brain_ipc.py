@@ -10,14 +10,14 @@ import time
 import unittest
 from unittest.mock import patch
 
-from brain import (BrainPlan, BrainResult, MODEL, PROVIDER_ERROR_REASONS,
+from embodied_arm.providers.brain import (BrainPlan, BrainResult, MODEL, PROVIDER_ERROR_REASONS,
                    REPLAN_ERROR_REASONS, validate_plan)
-import brain_ipc
-from brain_ipc import (BrainStore, FileBrainBridge, REQUEST_SCHEMA, RESULT_SCHEMA,
+import embodied_arm.runtime.brain_ipc as brain_ipc
+from embodied_arm.runtime.brain_ipc import (BrainStore, FileBrainBridge, REQUEST_SCHEMA, RESULT_SCHEMA,
                        REPLAN_REQUEST_SCHEMA, normalize_input, validate_job,
                        validate_result, worker_status)
-from brain_worker import main, worker_run
-from ipc import Store
+from embodied_arm.runtime.brain_worker import main, worker_run
+from embodied_arm.runtime.ipc import Store
 
 
 MP = multiprocessing.get_context('fork')
@@ -87,7 +87,7 @@ class BrainIPCTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / '.runtime' / 'brain-ipc'
-        self.patcher = patch('brain_ipc.BRAIN_IPC_ROOT', self.root)
+        self.patcher = patch('embodied_arm.runtime.brain_ipc.BRAIN_IPC_ROOT', self.root)
         self.patcher.start()
         self.threads = []
         self.brains = []
@@ -153,7 +153,7 @@ class BrainIPCTests(unittest.TestCase):
 
     def test_offline_is_fast_and_loads_no_config(self):
         before = time.monotonic()
-        with patch('brain.QwenBrain.from_config', side_effect=AssertionError('Must not load')):
+        with patch('embodied_arm.providers.brain.QwenBrain.from_config', side_effect=AssertionError('Must not load')):
             bridge = FileBrainBridge()
             self.assertFalse(bridge.status()['configured'])
             self.assertEqual(bridge.interpret('拿红块', scene()).reason, 'unavailable')
@@ -225,7 +225,7 @@ class BrainIPCTests(unittest.TestCase):
             release.wait(1)
             return original(*args)
 
-        with patch('brain_ipc.normalize_input', side_effect=blocked):
+        with patch('embodied_arm.runtime.brain_ipc.normalize_input', side_effect=blocked):
             client = threading.Thread(target=lambda: results.append(bridge.interpret('拿红块', scene())))
             client.start()
             self.assertTrue(entered.wait(1))
@@ -242,7 +242,7 @@ class BrainIPCTests(unittest.TestCase):
         client = threading.Thread(target=lambda: results.append(bridge.interpret('拿红块', scene())))
         client.start()
         self.assertTrue(brain.entered.wait(1))
-        with patch('brain_ipc.BrainStore.write', side_effect=OSError('unavailable')):
+        with patch('embodied_arm.runtime.brain_ipc.BrainStore.write', side_effect=OSError('unavailable')):
             bridge.cancel()
         client.join(1)
         worker.join(1)
@@ -274,7 +274,7 @@ class BrainIPCTests(unittest.TestCase):
 
         thread = threading.Thread(target=forge)
         thread.start()
-        with patch('brain_ipc.worker_status', return_value={'available': True, 'remaining_calls': 1}):
+        with patch('embodied_arm.runtime.brain_ipc.worker_status', return_value={'available': True, 'remaining_calls': 1}):
             done.append(FileBrainBridge().interpret('拿红块', scene()))
         thread.join(1)
         self.assertEqual(done[0].reason, 'invalid_response')
@@ -406,7 +406,7 @@ class BrainIPCTests(unittest.TestCase):
         self.assertEqual(result['rejected'], 1)
         link = Path(self.temp.name) / 'link'
         link.symlink_to(self.root, target_is_directory=True)
-        with patch('brain_ipc.BRAIN_IPC_ROOT', link), self.assertRaises(ValueError):
+        with patch('embodied_arm.runtime.brain_ipc.BRAIN_IPC_ROOT', link), self.assertRaises(ValueError):
             BrainStore()
 
     def test_invalid_worker_budgets_and_cli_never_load_config(self):
@@ -414,7 +414,7 @@ class BrainIPCTests(unittest.TestCase):
                      {'max_seconds': 601}, {'max_seconds': 0}, {'max_seconds': float('inf')}):
             with self.assertRaises(ValueError):
                 worker_run(MockBrain(), **args)
-        with patch('brain.QwenBrain.from_config', side_effect=AssertionError('Must not load')):
+        with patch('embodied_arm.providers.brain.QwenBrain.from_config', side_effect=AssertionError('Must not load')):
             with self.assertRaises(SystemExit):
                 main(['--config', '/never/read/config', '--max-calls', '11'])
 

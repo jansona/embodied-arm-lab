@@ -1,6 +1,6 @@
 """UI boundary tests: no model calls, oracle data, or legacy fallback."""
 from fastapi.testclient import TestClient
-from app_so101 import create_app
+from embodied_arm.web.app_so101 import create_app
 
 class SafeSimulation:
     def __init__(self,seed=0):self.paused=True;self.epoch=0;self.captures=0;self.closed=False
@@ -78,7 +78,7 @@ def test_pending_observation_duplicate_and_stop_discard_stale_result():
 
 def test_fresh_camera_only_plan_preview_does_not_enable_motion():
     import time
-    from brain import BrainResult,BrainPlan
+    from embodied_arm.providers.brain import BrainResult,BrainPlan
     class Vision:
         def status(self):return {'available':True,'provenance':'offline_fixture'}
     class Source:
@@ -187,7 +187,7 @@ def test_stop_discards_pending_waypoint_completion():
 
 def test_chat_works_without_scene_and_passes_history_without_motion():
     import time
-    from brain import BrainResult,BrainPlan
+    from embodied_arm.providers.brain import BrainResult,BrainPlan
     class Brain:
         def __init__(self):self.requests=[]
         def status(self):return {'available':True,'model':'offline-test'}
@@ -216,7 +216,7 @@ def test_chat_works_without_scene_and_passes_history_without_motion():
 
 def test_chat_pending_cancel_and_expired_worker_are_safe():
     import threading,time
-    from brain import BrainResult,BrainPlan
+    from embodied_arm.providers.brain import BrainResult,BrainPlan
     gate=threading.Event()
     class Brain:
         ready=True;calls=0
@@ -240,7 +240,7 @@ def test_chat_pending_cancel_and_expired_worker_are_safe():
 
 def test_chat_rejects_actionable_reply_and_renders_no_motion():
     import time
-    from brain import BrainResult,BrainPlan
+    from embodied_arm.providers.brain import BrainResult,BrainPlan
     class Brain:
         def status(self):return {'available':True}
         def interpret(self,*args,**kwargs):return BrainResult(plan=BrainPlan(action='pick',object_id='red',message='执行'),accepted=True)
@@ -256,7 +256,7 @@ def test_chat_rejects_actionable_reply_and_renders_no_motion():
 
 def test_one_text_task_observes_plans_executes_and_reports_verified_outcome():
     import time
-    from brain import BrainResult,BrainPlan
+    from embodied_arm.providers.brain import BrainResult,BrainPlan
     trace=[]
     class Source:
         def __init__(self,sim,vision):pass

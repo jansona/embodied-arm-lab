@@ -4,7 +4,7 @@ import unittest
 
 import httpx
 
-from adapters import ACTIONS, ALIYUN_ENDPOINT, ALIYUN_MODEL, Decision, JevAdapter, OFFICIAL_ENDPOINT, OFFICIAL_MODEL, request_preview
+from embodied_arm.providers.adapters import ACTIONS, ALIYUN_ENDPOINT, ALIYUN_MODEL, Decision, JevAdapter, OFFICIAL_ENDPOINT, OFFICIAL_MODEL, request_preview
 
 
 def answer(choice="x_plus", confidence=0.9):

@@ -8,7 +8,7 @@ import math
 import numpy as np
 import pybullet as p
 import pytest
-from so101_simulation import SO101Simulation
+from embodied_arm.simulation.so101_simulation import SO101Simulation
 
 
 def _settle(sim, ticks=264):

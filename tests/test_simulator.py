@@ -1,8 +1,8 @@
 import math
 import pytest
 import pybullet as p
-from simulator import Simulation
-from control import observation,apply_action
+from embodied_arm.simulation.simulator import Simulation
+from embodied_arm.legacy.panda.control import observation,apply_action
 
 @pytest.fixture
 def sim():

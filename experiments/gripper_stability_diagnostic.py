@@ -8,9 +8,9 @@ import json
 import math
 import time
 import pybullet as p
-from simulator import Simulation
-from stack_plans import plan_for_symbolic_step
-from task_executor import TaskExecutor
+from embodied_arm.simulation.simulator import Simulation
+from embodied_arm.legacy.panda.stack_plans import plan_for_symbolic_step
+from embodied_arm.legacy.panda.task_executor import TaskExecutor
 
 
 def couple_jaws(sim):

@@ -1,5 +1,5 @@
 import pytest
-from so101_uncertainty import axis_bands
+from embodied_arm.perception.so101_uncertainty import axis_bands
 
 def covariance(sigma):return [[sigma*sigma if i==j else 0 for j in range(3)] for i in range(3)]
 def test_near_boundary_does_not_block_large_axis_or_count_as_reached():

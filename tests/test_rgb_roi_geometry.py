@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 import pytest
-from rgb_roi_geometry import bounds_from_detections,frustum
+from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections,frustum
 
 def test_crop_uses_only_named_image_landmarks():
     images=[{'camera_id':c,'width':1920,'height':1440} for c in ('left','right')]

@@ -9,7 +9,7 @@ import pybullet as p
 import pybullet_data
 import pytest
 
-from so101_robot import ARM_JOINT_NAMES, ASSET_DIR, SO101Robot, URDF_PATH
+from embodied_arm.simulation.so101_robot import ARM_JOINT_NAMES, ASSET_DIR, SO101Robot, URDF_PATH
 
 
 @pytest.fixture

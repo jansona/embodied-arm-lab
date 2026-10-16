@@ -2,12 +2,12 @@
 import json,threading,time
 from pathlib import Path
 from types import SimpleNamespace
-from camera_perception import PixelDetection
-from so101_simulation import SO101Simulation
-from so101_control import CameraSceneSource
-from so101_executor import VisualWaypointExecutor
-from so101_jev import parse_response
-from adapters import ALIYUN_MODEL
+from embodied_arm.perception.camera_perception import PixelDetection
+from embodied_arm.simulation.so101_simulation import SO101Simulation
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.control.so101_executor import VisualWaypointExecutor
+from embodied_arm.providers.so101_jev import parse_response
+from embodied_arm.providers.adapters import ALIYUN_MODEL
 
 def run(recorded_detections,object_id='red',high_resolution=False):
     class VisionFixture:
@@ -17,7 +17,7 @@ def run(recorded_detections,object_id='red',high_resolution=False):
             for d in recorded_detections:
                 detections.append(PixelDetection(d['object_id'],d['camera_id'],packet['frame_id'],
                     (d['uv_1000'][0]*(sizes[d['camera_id']][0]-1)/1000,d['uv_1000'][1]*(sizes[d['camera_id']][1]-1)/1000),d['confidence'],d['sigma_1000']*(sizes[d['camera_id']][0]-1)/1000,'visible',d['landmark']))
-            from vision_adapter import VisionResult
+            from embodied_arm.providers.vision_adapter import VisionResult
             return VisionResult(accepted=True,reason='accepted',frame_id=packet['frame_id'],captured_at=packet['captured_at'],detections=tuple(detections),provenance='offline_fixture',calls=0,model='recorded_pixel_fixture')
     class JevFixture:
         def decide(self,obs):

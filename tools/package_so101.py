@@ -19,18 +19,22 @@ def include_source(path):
         return False
     if relative.parts[:2] == ('tests', 'fixtures'):
         return len(relative.parts) == 3 and path.name in SAFE_FIXTURES
-    if relative.parts[0] == 'assets':
+    if relative.parts[:2] == ('embodied_arm', 'assets'):
         return path.suffix in SOURCE_EXTENSIONS | ASSET_EXTENSIONS or path.name == 'LICENSE'
     return path.suffix in SOURCE_EXTENSIONS or path.name == '.gitignore'
 
 
 def package(destination):
     destination=Path(destination)
-    roots=('assets','static','static_so101','tests','embodied_arm','experiments','tools','docs')
-    files=[p for p in ROOT.iterdir() if p.is_file() and (p.suffix in ('.py','.md','.sh','.txt') or p.name=='.gitignore')]
-    example=ROOT/'config.example.json'
+    roots=('tests','embodied_arm','experiments','tools','docs','scripts')
+    files=[ROOT/name for name in ('README.md','requirements.txt','pyproject.toml','.gitignore') if (ROOT/name).is_file()]
+    example=ROOT/'config/provider.example.json'
+    if example.is_symlink():
+        raise ValueError('Unsafe configuration template path')
     if example.exists():
         data=json.loads(example.read_text())
+        if not isinstance(data,dict) or set(data)-{'provider','endpoint','model','api_key','min_confidence','timeout'}:
+            raise ValueError('Unexpected configuration template fields')
         if data.get('api_key') not in ('',None):raise ValueError('Example contains nonempty credential')
         files.append(example)
     for name in roots:

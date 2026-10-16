@@ -2,7 +2,7 @@
 import json
 import unittest
 import httpx
-from adapters import ACTIONS, ALIYUN_ENDPOINT, ALIYUN_MODEL, JevAdapter
+from embodied_arm.providers.adapters import ACTIONS, ALIYUN_ENDPOINT, ALIYUN_MODEL, JevAdapter
 from experiments.direction_audit import batch_request, coordinate_cases, expected_direction, run_audit
 
 

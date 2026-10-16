@@ -1,6 +1,6 @@
 # 可选实验与诊断
 
-这些脚本不参与 `./run-so101.sh` 的正常启动。从仓库根目录以 `python -m experiments.<模块名>` 运行，避免依赖脚本所在目录的 import 行为。
+这些脚本不参与 `./scripts/run-so101.sh` 的正常启动。从仓库根目录以 `python -m experiments.<模块名>` 运行，避免依赖脚本所在目录的 import 行为。
 
 - `evaluate_so101_landmarks`：读取显式提供的诊断数据，计算离线指标
 - `so101_waypoint_diagnostic`：读取显式提供的像素记录，以模拟 Jev 检查物理执行

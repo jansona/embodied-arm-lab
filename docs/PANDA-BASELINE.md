@@ -37,7 +37,7 @@ Python3.11 is recommended so PyBullet can use a prebuilt wheel.
 ```sh
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 8765
+.venv/bin/python -m uvicorn embodied_arm.web.app:app --host 127.0.0.1 --port 8765
 ```
 
 Open http://127.0.0.1:8765 on that same computer. It is a loopback development app, not a public website. The prepared cloud installation uses `.venv311`.
@@ -51,23 +51,23 @@ In this environment the visible desktop and managed-network shell are separate e
 Visible desktop terminal:
 
 ```sh
-./run-ipc.sh
+./scripts/run-ipc.sh
 ```
 
 Approved managed-network execution environment, separate terminals:
 
 ```sh
-.venv311/bin/python brain_worker.py --config ../jev-arm-config.json --max-calls 6 --max-seconds 600
-.venv311/bin/python inference_worker.py --micro-phased --max-calls 200 --max-seconds 420
+.venv311/bin/python -m embodied_arm.runtime.brain_worker --config ../jev-arm-config.json --max-calls 6 --max-seconds 600
+.venv311/bin/python -m embodied_arm.runtime.inference_worker --micro-phased --max-calls 200 --max-seconds 420
 ```
 
-For an ordinary computer where the browser and API networking share one environment, run `./run-session.sh` to launch the UI and both bounded workers with one command. In this cloud split, keep the visible desktop server and run `./run-session.sh --workers-only` in the approved managed-network environment. The launcher sends no request until an explicit UI task and never renews a window automatically.
+For an ordinary computer where the browser and API networking share one environment, run `./scripts/run-session.sh` to launch the UI and both bounded workers with one command. In this cloud split, keep the visible desktop server and run `./scripts/run-session.sh --workers-only` in the approved managed-network environment. The launcher sends no request until an explicit UI task and never renews a window automatically.
 
 Then select live Qwen and Jev in the UI, load the server configuration and submit a task. Workers terminate at their explicit call/time budgets; they do not restart automatically. The offline mock brain uses no API and is visibly labelled. Normal dialogue sequences use the explicitly shown200-request/420-second Jev preset. Stop still cancels immediately; limits are maximums, not promised usage.
 
 ## Credentials and provider
 
-`config.example.json` is an empty template. The actual key belongs in `../jev-arm-config.json`, outside the project, entered and saved by the owner. No browser credential entry, client-side storage, source-control key, or key-bearing log is needed. This repository excludes the actual configuration and private runtime queues.
+`config/provider.example.json` is an empty template. The actual key belongs in `../jev-arm-config.json`, outside the project, entered and saved by the owner. No browser credential entry, client-side storage, source-control key, or key-bearing log is needed. This repository excludes the actual configuration and private runtime queues.
 
 - Jev: `POST https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/systemone`, model `decision-model-preview`, typed `state` + `questions` schema
 - Qwen: same provider base with `/chat/completions`, model `qwen3.8-max`
@@ -91,16 +91,16 @@ The continuation utilities are narrow, provenance-checked experiment recovery to
 
 ```sh
 .venv311/bin/python -m pytest -q
-.venv311/bin/python evaluate.py
+.venv311/bin/python -m experiments.evaluate
 ```
 
 Tests cover provider schemas/errors, cancelled and stale responses, private IPC validation, bounded worker budgets, physical pick/place/stack, finger stability, conversation plans and recovery guards. They use mocked API transport unless a script is explicitly described as a live diagnostic. Do not run live scripts merely to run the offline test suite.
 
-Historical pick/stack summaries, gripper diagnostics and continuation audits are excluded. The offline tests use their own generated or mocked inputs; running `evaluate.py` creates a new local evaluation report rather than restoring historical trial evidence.
+Historical pick/stack summaries, gripper diagnostics and continuation audits are excluded. The offline tests use their own generated or mocked inputs; running `experiments/evaluate.py` creates a new local evaluation report rather than restoring historical trial evidence.
 
 Cold request latency includes connection/proxy/TLS setup. Reused-client warm requests have often been roughly0.5–1second in these trials; this is observed end-to-end latency, not guaranteed model inference time. A provider `latency_ms` field is retained separately and is not assumed to cover the entire request.
 
-Main modules: `brain.py`, `brain_ipc.py`, `brain_worker.py`, `microcontrol_experiment.py`, `inference_worker.py`, `ipc.py`, `sequence_executor.py`, `stack_plans.py`, `task_executor.py`, `control.py`, `simulator.py`, `app.py`, and `static/`.
+Main modules: `embodied_arm/providers/brain.py`, `embodied_arm/runtime/brain_ipc.py`, `embodied_arm/runtime/brain_worker.py`, `embodied_arm/legacy/panda/microcontrol_experiment.py`, `embodied_arm/runtime/inference_worker.py`, `embodied_arm/runtime/ipc.py`, `embodied_arm/legacy/panda/sequence_executor.py`, `embodied_arm/legacy/panda/stack_plans.py`, `embodied_arm/legacy/panda/task_executor.py`, `embodied_arm/legacy/panda/control.py`, `embodied_arm/simulation/simulator.py`, `embodied_arm/web/app.py`, and `static/`.
 
 ## Source-only publication
 

@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 import httpx
-from adapters import ALIYUN_ENDPOINT, ALIYUN_MODEL
-from so101_jev import (SO101JevAdapter,SO101Decision,build_observation,request_preview,
+from embodied_arm.providers.adapters import ALIYUN_ENDPOINT, ALIYUN_MODEL
+from embodied_arm.providers.so101_jev import (SO101JevAdapter,SO101Decision,build_observation,request_preview,
                        validate_observation,parse_response,validate_decision)
 
 
@@ -125,7 +125,7 @@ class SO101JevTests(unittest.TestCase):
             self.assertEqual(request.headers['authorization'],'Bearer mock-only-placeholder')
             self.assertEqual(json.loads(request.content),request_preview(observation())['body'])
             return httpx.Response(200,json=answer())
-        with patch('so101_jev.httpx.Client',wraps=httpx.Client) as factory:
+        with patch('embodied_arm.providers.so101_jev.httpx.Client',wraps=httpx.Client) as factory:
             with self.adapter(handler=handler) as adapter:
                 self.assertEqual(seen,[])
                 self.assertTrue(adapter.decide(observation()).accepted)
@@ -159,7 +159,7 @@ class SO101JevTests(unittest.TestCase):
             self.assertEqual(len(calls),1);self.assertEqual(result.reason,reason);self.assertIsNone(result.action)
     def test_explicit_config_loader_is_mocked_preserves_threshold_and_never_calls(self):
         # No real config path is opened. Only the established loader is mocked.
-        with patch('runner.JevRunner') as loader, patch('so101_jev.httpx.Client') as client:
+        with patch('embodied_arm.legacy.panda.runner.JevRunner') as loader, patch('embodied_arm.providers.so101_jev.httpx.Client') as client:
             loader.return_value._adapter=SimpleNamespace(_api_key='mock-only-placeholder',endpoint=ALIYUN_ENDPOINT,
                                                          model=ALIYUN_MODEL,min_confidence=.8)
             with SO101JevAdapter.from_config('/fake-explicit-path',use_environment_network=True) as adapter:
@@ -170,7 +170,7 @@ class SO101JevTests(unittest.TestCase):
                 client.return_value.stream.assert_not_called()
                 self.assertTrue(client.call_args.kwargs['trust_env'])
             loader.return_value.configure.assert_called_once_with('/fake-explicit-path')
-        with patch('runner.JevRunner') as loader:
+        with patch('embodied_arm.legacy.panda.runner.JevRunner') as loader:
             loader.return_value.configure.side_effect=ValueError('SECRET-config-error')
             with self.assertRaisesRegex(ValueError,'approved external') as error:
                 SO101JevAdapter.from_config('/fake-explicit-path')

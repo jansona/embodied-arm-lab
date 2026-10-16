@@ -2,8 +2,8 @@
 import json,math
 from pathlib import Path
 import numpy as np
-from camera_perception import CameraCalibration,_closest_point
-from so101_simulation import SO101Simulation,camera_calibration
+from embodied_arm.perception.camera_perception import CameraCalibration,_closest_point
+from embodied_arm.simulation.so101_simulation import SO101Simulation,camera_calibration
 
 def evaluate(diagnostic):
     calibrations=[CameraCalibration.from_dict(camera_calibration(k)) for k in ('left','right')]

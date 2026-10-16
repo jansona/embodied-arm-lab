@@ -8,9 +8,9 @@ import sys
 import time
 import numpy as np
 import pybullet as p
-from rgb_coarse_fixture import RGBColourFixture
-from so101_simulation import SO101Simulation
-from so101_control import CameraSceneSource
+from tests.rgb_coarse_fixture import RGBColourFixture
+from embodied_arm.simulation.so101_simulation import SO101Simulation
+from embodied_arm.control.so101_control import CameraSceneSource
 
 PROFILES = {
     'shadow_off': {'shadow': 0},
@@ -70,8 +70,8 @@ def validate_roi_and_occlusion(seed=0):
     from dataclasses import replace
     from io import BytesIO
     from PIL import Image, ImageDraw
-    from rgb_roi_geometry import bounds_from_detections
-    from rgb_scaled_refinement import refine_packet
+    from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
+    from embodied_arm.perception.rgb_scaled_refinement import refine_packet
     sim = SO101Simulation(seed=seed, camera_size=(1920, 1440))
     original_call = sim.call
     def call(fn, *args, **kwargs):

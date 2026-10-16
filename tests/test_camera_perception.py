@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 import pytest
 
-from camera_perception import (CameraCalibration, RGBFrame, PixelDetection,
+from embodied_arm.perception.camera_perception import (CameraCalibration, RGBFrame, PixelDetection,
                                PerceptionConfig, ObjectEstimate, EstimatedScene,
                                estimate_scene, _closest_point)
 

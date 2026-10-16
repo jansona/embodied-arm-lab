@@ -1,9 +1,9 @@
 """Rendered-RGB integration; detector is an explicit offline color fixture."""
 import pytest
-from so101_simulation import SO101Simulation
-from so101_control import CameraSceneSource
-from embodied_arm.phase_observer import PhaseSceneObserver
-from rgb_coarse_fixture import RGBColourFixture
+from embodied_arm.simulation.so101_simulation import SO101Simulation
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.perception.phase_observer import PhaseSceneObserver
+from tests.rgb_coarse_fixture import RGBColourFixture
 
 def test_actual_rgb_phase_initialization_never_reads_oracle(monkeypatch):
     sim=SO101Simulation(seed=0)
@@ -21,7 +21,7 @@ def test_actual_rgb_phase_initialization_never_reads_oracle(monkeypatch):
     finally:sim.close()
 
 def test_shadow_free_rgb_v1_high_resolution_roi_meets_precision_floor(monkeypatch):
-    from so101_uncertainty import axis_bands
+    from embodied_arm.perception.so101_uncertainty import axis_bands
     sim=SO101Simulation(seed=0,camera_size=(1920,1440),illumination_profile='shadow_free_rgb_v1')
     try:
         monkeypatch.setattr(sim,'evaluation_state',lambda:(_ for _ in ()).throw(AssertionError('Oracle forbidden')))

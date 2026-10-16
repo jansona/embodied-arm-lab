@@ -1,7 +1,7 @@
 from types import SimpleNamespace
-from test_so101_control import SafeFake,Vision
-from so101_control import CameraSceneSource
-from so101_executor import VisualWaypointExecutor
+from tests.test_so101_control import SafeFake,Vision
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.control.so101_executor import VisualWaypointExecutor
 
 class Sim(SafeFake):
     def __init__(self):super().__init__();self.ee=[.198,-.05,.06];self.commands=[]

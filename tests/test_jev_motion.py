@@ -2,8 +2,8 @@
 from copy import deepcopy
 import threading
 import pytest
-from embodied_arm.jev_motion import JevMotionDriver
-from so101_jev import parse_response, ALIYUN_MODEL
+from embodied_arm.control.jev_motion import JevMotionDriver
+from embodied_arm.providers.so101_jev import parse_response, ALIYUN_MODEL
 
 
 class FakeSim:
@@ -157,7 +157,7 @@ def test_deadline_budget_workspace_and_covariance_guards():
 
 
 def test_real_simulation_servo_motion_with_fake_jev_and_external_ticks(monkeypatch):
-    from so101_simulation import SO101Simulation
+    from embodied_arm.simulation.so101_simulation import SO101Simulation
     import pybullet as p
     sim=SO101Simulation()
     try:

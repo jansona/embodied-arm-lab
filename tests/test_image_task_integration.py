@@ -5,14 +5,14 @@ floor. It is not a claim that image-only picking works.
 """
 import time
 from types import SimpleNamespace
-from so101_simulation import SO101Simulation
-from so101_control import CameraSceneSource
-from embodied_arm.phase_observer import PhaseSceneObserver
-from embodied_arm.manipulation import VisualManipulationExecutor
-from embodied_arm.jev_motion import JevMotionDriver
-from embodied_arm.task_service import TaskService
-from rgb_coarse_fixture import RGBColourFixture
-from test_jev_motion import FakeJev
+from embodied_arm.simulation.so101_simulation import SO101Simulation
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.perception.phase_observer import PhaseSceneObserver
+from embodied_arm.control.manipulation import VisualManipulationExecutor
+from embodied_arm.control.jev_motion import JevMotionDriver
+from embodied_arm.services.task_service import TaskService
+from tests.rgb_coarse_fixture import RGBColourFixture
+from tests.test_jev_motion import FakeJev
 
 class FakeBrain:
     def status(self):return {'available':True}

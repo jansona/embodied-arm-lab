@@ -9,7 +9,7 @@ import json
 import math
 from pathlib import Path
 import httpx
-from adapters import ACTIONS, CRITERIA, JevAdapter, MAX_RESPONSE_BYTES, validate_provider
+from embodied_arm.providers.adapters import ACTIONS, CRITERIA, JevAdapter, MAX_RESPONSE_BYTES, validate_provider
 
 
 def coordinate_cases():
@@ -111,7 +111,7 @@ def main():
     parser=argparse.ArgumentParser(description='One seven-case direction/hold API-only audit; never moves the arm')
     parser.add_argument('--environment-network',action='store_true')
     args=parser.parse_args()
-    from runner import JevRunner
+    from embodied_arm.legacy.panda.runner import JevRunner
     runner=JevRunner(NoRobot(),use_environment_network=args.environment_network)
     try:
         runner.configure(Path(__file__).resolve().parents[2]/'jev-arm-config.json')

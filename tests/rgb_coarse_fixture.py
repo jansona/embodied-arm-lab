@@ -8,10 +8,10 @@ import base64
 from io import BytesIO
 import numpy as np
 from PIL import Image
-from camera_perception import PixelDetection, LANDMARKS
-from rgb_semantic_colour import semantic_colour_mask
-from rgb_face_refinement import _components, refine_rgb_landmark
-from vision_adapter import VisionResult
+from embodied_arm.perception.camera_perception import PixelDetection, LANDMARKS
+from embodied_arm.perception.rgb_semantic_colour import semantic_colour_mask
+from embodied_arm.perception.rgb_face_refinement import _components, refine_rgb_landmark
+from embodied_arm.providers.vision_adapter import VisionResult
 
 
 class RGBColourFixture:
@@ -20,9 +20,9 @@ class RGBColourFixture:
 
     def perceive(self, packet):
         if self.profile == 'scaled':
-            from rgb_scaled_refinement import refine_rgb_landmark
+            from embodied_arm.perception.rgb_scaled_refinement import refine_rgb_landmark
         else:
-            from rgb_face_refinement import refine_rgb_landmark
+            from embodied_arm.perception.rgb_face_refinement import refine_rgb_landmark
         detections = []
         for item in packet['images']:
             raw = base64.b64decode(item['data_url'].split(',', 1)[1])

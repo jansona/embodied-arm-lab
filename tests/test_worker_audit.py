@@ -3,10 +3,10 @@ import pytest
 import threading
 from pathlib import Path
 import time
-from adapters import ACTIONS,Decision
-from inference_worker import AuditRecorder,worker_run
-from ipc import Store,FileBridgeAdapter
-from test_ipc import state
+from embodied_arm.providers.adapters import ACTIONS,Decision
+from embodied_arm.runtime.inference_worker import AuditRecorder,worker_run
+from embodied_arm.runtime.ipc import Store,FileBridgeAdapter
+from tests.test_ipc import state
 
 def test_audit_more_than_48_records_is_bounded(tmp_path):
     store=Store(tmp_path/'ipc');audit=AuditRecorder(store)
@@ -27,7 +27,7 @@ def test_audit_write_failure_is_nonfatal():
 
 @pytest.mark.parametrize('budget',[48,120,130,200])
 def test_full_bounded_mock_ipc_calls(tmp_path,monkeypatch,budget):
-    import ipc
+    import embodied_arm.runtime.ipc as ipc
     monkeypatch.setattr(ipc,'IPC_ROOT',tmp_path/'ipc')
     class Model:
         max_worker_calls=200;max_worker_seconds=420

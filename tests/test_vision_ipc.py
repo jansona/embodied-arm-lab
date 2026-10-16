@@ -17,12 +17,12 @@ from unittest.mock import patch
 import httpx
 from PIL import Image
 
-import ipc
-from brain import ENDPOINT, MODEL
-from vision_adapter import QwenVision, VisionResult, validate_detections
-from vision_ipc import (FileVisionBridge, VisionStore, MAX_BYTES, REQUEST_SCHEMA, RESULT_SCHEMA,
+import embodied_arm.runtime.ipc as ipc
+from embodied_arm.providers.brain import ENDPOINT, MODEL
+from embodied_arm.providers.vision_adapter import QwenVision, VisionResult, validate_detections
+from embodied_arm.runtime.vision_ipc import (FileVisionBridge, VisionStore, MAX_BYTES, REQUEST_SCHEMA, RESULT_SCHEMA,
     normalize_packet, packet_hash, validate_job, validate_result, worker_status)
-from vision_worker import main, worker_run
+from embodied_arm.runtime.vision_worker import main, worker_run
 
 MP = multiprocessing.get_context('fork')
 
@@ -98,7 +98,7 @@ class VisionIPCTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name) / '.runtime' / 'vision-ipc'
-        self.patcher = patch('vision_ipc.VISION_IPC_ROOT', self.root)
+        self.patcher = patch('embodied_arm.runtime.vision_ipc.VISION_IPC_ROOT', self.root)
         self.patcher.start()
         self.threads = []
 
@@ -275,7 +275,7 @@ class VisionIPCTests(unittest.TestCase):
             release.wait(1)
             return normalize_packet(packet)
 
-        with patch('vision_ipc.normalize_packet', side_effect=slow):
+        with patch('embodied_arm.runtime.vision_ipc.normalize_packet', side_effect=slow):
             client = threading.Thread(target=lambda: results.append(bridge.perceive(packet())))
             client.start()
             self.assertTrue(entered.wait(1))
@@ -304,7 +304,7 @@ class VisionIPCTests(unittest.TestCase):
         client = threading.Thread(target=lambda: results.append(bridge.perceive(packet())))
         client.start()
         self.assertTrue(adapter.entered.wait(1))
-        with patch('vision_ipc.VisionStore.write', side_effect=OSError('unavailable')):
+        with patch('embodied_arm.runtime.vision_ipc.VisionStore.write', side_effect=OSError('unavailable')):
             bridge.cancel()
         client.join(1)
         worker.join(1)
@@ -334,7 +334,7 @@ class VisionIPCTests(unittest.TestCase):
 
         thread = threading.Thread(target=forge)
         thread.start()
-        with patch('vision_ipc.worker_status', return_value={'available': True, 'remaining_calls': 1}):
+        with patch('embodied_arm.runtime.vision_ipc.worker_status', return_value={'available': True, 'remaining_calls': 1}):
             result = FileVisionBridge().perceive(packet())
         thread.join(1)
         self.assertEqual(result.reason, 'invalid_response')
@@ -368,7 +368,7 @@ class VisionIPCTests(unittest.TestCase):
 
     def test_frame_that_ages_in_flight_never_delivers_accepted_pixels(self):
         self.job()
-        with patch('vision_ipc.MAX_FRAME_AGE', .08):
+        with patch('embodied_arm.runtime.vision_ipc.MAX_FRAME_AGE', .08):
             done = worker_run(FakeVision('slow'), max_calls=1, max_seconds=.4)
         result = self.read('a' * 32 + '.result')['result']
         self.assertFalse(result['accepted'])
@@ -479,7 +479,7 @@ class VisionIPCTests(unittest.TestCase):
             store.close()
         link = Path(self.temp.name) / 'link'
         link.symlink_to(self.root, target_is_directory=True)
-        with patch('vision_ipc.VISION_IPC_ROOT', link), self.assertRaises(ValueError):
+        with patch('embodied_arm.runtime.vision_ipc.VISION_IPC_ROOT', link), self.assertRaises(ValueError):
             VisionStore()
 
     def test_file_size_duplicate_json_and_legacy_limits_unchanged(self):
@@ -537,7 +537,7 @@ class VisionIPCTests(unittest.TestCase):
             store.close()
 
     def test_explicit_config_uses_approved_loader_and_never_calls_api(self):
-        with patch('brain.QwenBrain.from_config', return_value=SimpleNamespace(_api_key='FAKE-TEST-KEY')) as loader:
+        with patch('embodied_arm.providers.brain.QwenBrain.from_config', return_value=SimpleNamespace(_api_key='FAKE-TEST-KEY')) as loader:
             with patch('httpx.Client', side_effect=AssertionError('No API call')):
                 adapter = QwenVision.from_config('/fake/explicit/config', max_calls=3, timeout=9,
                                                  use_environment_network=True)
@@ -547,7 +547,7 @@ class VisionIPCTests(unittest.TestCase):
         self.assertEqual(adapter.timeout, 9)
         self.assertEqual(adapter.status()['endpoint'], ENDPOINT)
         self.assertNotIn('FAKE-TEST-KEY', json.dumps(adapter.status()))
-        with patch('brain.QwenBrain.from_config', side_effect=ValueError('Cannot load approved config')):
+        with patch('embodied_arm.providers.brain.QwenBrain.from_config', side_effect=ValueError('Cannot load approved config')):
             with self.assertRaisesRegex(ValueError, 'Cannot load approved config'):
                 QwenVision.from_config('/fake/rejected/config')
 

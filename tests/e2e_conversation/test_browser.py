@@ -12,9 +12,8 @@ import pytest
 import uvicorn
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from app_so101 import create_app
-from brain import BrainPlan, BrainResult
+from embodied_arm.web.app_so101 import create_app
+from embodied_arm.providers.brain import BrainPlan, BrainResult
 
 
 class FakeRobot:

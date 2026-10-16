@@ -4,14 +4,14 @@ from dataclasses import replace, asdict
 import json
 import math
 import time
-from camera_perception import CameraCalibration,RGBFrame,estimate_scene,PerceptionConfig
-from so101_simulation import SO101Simulation
-from so101_control import CameraSceneSource,OBSERVATION_VOLUME
-from rgb_roi_geometry import bounds_from_detections
-from rgb_scaled_refinement import refine_packet
-from rgb_coarse_fixture import RGBColourFixture
-from test_so101_grasp_feasibility import _fixture_move,_settle
-from embodied_arm.visual_feedback import VisualObservation,DynamicRGBPhaseTracker,VisualPhaseVerifier
+from embodied_arm.perception.camera_perception import CameraCalibration,RGBFrame,estimate_scene,PerceptionConfig
+from embodied_arm.simulation.so101_simulation import SO101Simulation
+from embodied_arm.control.so101_control import CameraSceneSource,OBSERVATION_VOLUME
+from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
+from embodied_arm.perception.rgb_scaled_refinement import refine_packet
+from tests.rgb_coarse_fixture import RGBColourFixture
+from tests.test_so101_grasp_feasibility import _fixture_move,_settle
+from embodied_arm.perception.visual_feedback import VisualObservation,DynamicRGBPhaseTracker,VisualPhaseVerifier
 
 
 def run():

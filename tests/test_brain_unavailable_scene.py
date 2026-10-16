@@ -1,6 +1,6 @@
 import pytest
-from brain import scene_snapshot, request_preview, validate_plan
-from brain_ipc import normalize_input
+from embodied_arm.providers.brain import scene_snapshot, request_preview, validate_plan
+from embodied_arm.runtime.brain_ipc import normalize_input
 SCENE={'observation_status':'unavailable','blocks':{}}
 def test_explicit_unknown_scene_without_fake_coordinates():
     assert scene_snapshot(SCENE)==SCENE

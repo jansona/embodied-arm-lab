@@ -2,7 +2,7 @@ import base64
 from io import BytesIO
 from PIL import Image
 import pytest
-from so101_simulation import SO101Simulation
+from embodied_arm.simulation.so101_simulation import SO101Simulation
 
 @pytest.mark.parametrize('size',[(640,480),(1280,960),(1920,1440)])
 def test_explicit_native_resolution_matches_rgb_and_calibration(size):

@@ -2,8 +2,8 @@
 import threading
 import time
 from fastapi.testclient import TestClient
-import app as module
-from brain import BrainPlan, BrainResult
+import embodied_arm.web.app as module
+from embodied_arm.providers.brain import BrainPlan, BrainResult
 
 
 class FakeBrain:
@@ -127,7 +127,7 @@ def test_provider_error_preserves_call_count_after_worker_exit():
 
 
 def test_sequence_chat_routes_model_order_and_explicit_repair_flag(monkeypatch):
-    from brain import BrainStep
+    from embodied_arm.providers.brain import BrainStep
     captured=[]
     class SequenceBrain(FakeBrain):
         def interpret(self,*args,**kwargs):

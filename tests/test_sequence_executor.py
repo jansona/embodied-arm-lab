@@ -2,8 +2,8 @@
 import copy
 import threading
 import time
-from brain import BrainPlan, BrainResult, BrainStep
-from sequence_executor import SequenceExecutor
+from embodied_arm.providers.brain import BrainPlan, BrainResult, BrainStep
+from embodied_arm.legacy.panda.sequence_executor import SequenceExecutor
 
 
 def plan():
@@ -115,7 +115,7 @@ def test_controller_rejection_does_not_replan_or_fallback():
 
 
 def test_real_contact_physics_sequence_stacks_blue_on_red():
-    from simulator import Simulation
+    from embodied_arm.simulation.simulator import Simulation
     sim=Simulation();runner=SequenceExecutor(sim)
     try:
         runner.start(plan());end=time.monotonic()+20

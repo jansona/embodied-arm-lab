@@ -5,8 +5,8 @@ import json
 import time
 import httpx
 import pytest
-from adapters import Decision
-from continue_stack import HTTPArmBackend, GuardedController, load_checkpoint
+from embodied_arm.providers.adapters import Decision
+from embodied_arm.legacy.panda.continue_stack import HTTPArmBackend, GuardedController, load_checkpoint
 
 
 def scene():
@@ -25,7 +25,7 @@ def fixture_files(tmp_path):
     plan={'action':'sequence','object_id':None,'target_id':None,'message':'红色作底蓝色在上','steps':steps}
     snapshot['chat']={'plan':plan,'controller':'jev','provenance':'live','task':{'steps':[
         {**s,'status':status,'outcome':{'verified':status=='completed'}} for s,status in zip(steps,['completed','failed','pending','pending'])]}}
-    from adapters import ACTIONS
+    from embodied_arm.providers.adapters import ACTIONS
     probs={a:0. for a in ACTIONS};probs.update(open=.61,hold=.39)
     decision={'action':'hold','proposed_action':'open','accepted':False,'reason':'low_confidence',
               'confidence':.4,'probabilities':probs}
@@ -112,7 +112,7 @@ def test_controller_has_one_shared_call_and_deadline_budget():
 
 
 def test_execute_only_failed_primitive_suffix_then_original_steps(tmp_path):
-    from continue_stack import execute
+    from embodied_arm.legacy.panda.continue_stack import execute
     snap,path,snapshot,record=fixture_files(tmp_path)
     class Backend:
         cancelled=False
@@ -146,7 +146,7 @@ def test_execute_only_failed_primitive_suffix_then_original_steps(tmp_path):
 
 
 def test_failed_release_measurement_never_starts_remaining_plan(tmp_path):
-    from continue_stack import execute
+    from embodied_arm.legacy.panda.continue_stack import execute
     _,_,snapshot,record=fixture_files(tmp_path)
     class Backend:
         cancelled=False

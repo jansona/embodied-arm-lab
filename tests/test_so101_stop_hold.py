@@ -1,7 +1,7 @@
 """Independent real-physics fixture regression for stop/resume holding force."""
 import pytest
 import pybullet as p
-from so101_simulation import SO101Simulation
+from embodied_arm.simulation.so101_simulation import SO101Simulation
 from tests.test_so101_grasp_feasibility import _fixture_move,_settle
 
 

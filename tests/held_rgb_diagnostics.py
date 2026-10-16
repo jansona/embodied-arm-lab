@@ -3,9 +3,9 @@ import base64
 import json
 from pathlib import Path
 import time
-from rgb_coarse_fixture import RGBColourFixture
-from rgb_coarse_packet import prepare_coarse_packet, remap_detections
-from rgb_scaled_refinement import refine_rgb_landmark
+from tests.rgb_coarse_fixture import RGBColourFixture
+from embodied_arm.perception.rgb_coarse_packet import prepare_coarse_packet, remap_detections
+from embodied_arm.perception.rgb_scaled_refinement import refine_rgb_landmark
 
 
 def inspect(name, stage):

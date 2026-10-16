@@ -1,7 +1,7 @@
 """Single local-target API diagnostic using normal saved app configuration; no robot."""
 import json
 from pathlib import Path
-from runner import JevRunner
+from embodied_arm.legacy.panda.runner import JevRunner
 class NoRobot:
     def stop(self):pass
 

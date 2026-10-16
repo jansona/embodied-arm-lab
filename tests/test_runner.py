@@ -8,8 +8,8 @@ import unittest
 import httpx
 from unittest.mock import patch
 
-from adapters import ACTIONS, Decision, JevAdapter, OFFICIAL_ENDPOINT, ALIYUN_ENDPOINT, ALIYUN_MODEL
-from runner import JevRunner
+from embodied_arm.providers.adapters import ACTIONS, Decision, JevAdapter, OFFICIAL_ENDPOINT, ALIYUN_ENDPOINT, ALIYUN_MODEL
+from embodied_arm.legacy.panda.runner import JevRunner
 
 
 class FakeSim:

@@ -9,9 +9,9 @@ import time
 import pybullet as p
 import pytest
 
-from simulator import Simulation
-from stack_plans import plan_for_symbolic_step, symbolic_step_result
-from task_executor import TaskExecutor, validate_plan
+from embodied_arm.simulation.simulator import Simulation
+from embodied_arm.legacy.panda.stack_plans import plan_for_symbolic_step, symbolic_step_result
+from embodied_arm.legacy.panda.task_executor import TaskExecutor, validate_plan
 
 
 def scene():

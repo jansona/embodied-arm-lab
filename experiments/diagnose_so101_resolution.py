@@ -6,7 +6,7 @@ source files, ground-truth inputs, or control paths are modified.
 from pathlib import Path
 import base64,json,sys,hashlib,collections
 import numpy as np
-import rgb_face_refinement as refinement
+import embodied_arm.perception.rgb_face_refinement as refinement
 
 ROOT=Path(__file__).resolve().parents[1]
 WORK=Path('/tmp/so101-resolution-experiment')

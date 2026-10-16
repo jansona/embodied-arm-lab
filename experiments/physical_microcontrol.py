@@ -1,10 +1,10 @@
 """Three-call numeric Jev closed-loop test in an independent physical simulator."""
 import json,math,argparse
 from pathlib import Path
-from microcontrol_experiment import MicroController
-from control import apply_action
-from simulator import Simulation
-from runner import JevRunner
+from embodied_arm.legacy.panda.microcontrol_experiment import MicroController
+from embodied_arm.legacy.panda.control import apply_action
+from embodied_arm.simulation.simulator import Simulation
+from embodied_arm.legacy.panda.runner import JevRunner
 class NoRobot:
     def stop(self):pass
 

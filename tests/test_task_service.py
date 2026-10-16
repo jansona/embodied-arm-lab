@@ -1,7 +1,7 @@
 import threading,time
 from types import SimpleNamespace
 import pytest
-from embodied_arm.task_service import TaskService, UNKNOWN_SCENE
+from embodied_arm.services.task_service import TaskService, UNKNOWN_SCENE
 class Source:
  def refresh(self):pass
  def brain_scene(self):return {'blocks':{'red':[.2,0,.01]},'goal':[.25,0,.01],'ee':[.2,0,.06]}

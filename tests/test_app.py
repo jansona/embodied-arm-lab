@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from app import app
+from embodied_arm.web.app import app
 
 def test_web_api():
     with TestClient(app) as c:

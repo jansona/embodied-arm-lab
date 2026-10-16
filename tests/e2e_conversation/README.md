@@ -40,9 +40,9 @@ A P1 raw `planning_failed` message was found, fixed by the UI owner, and verifie
 On a supported local runtime:
 
 ```sh
-python tests/e2e_conversation/serve_fixture.py
+python -m tests.e2e_conversation.serve_fixture
 # http://127.0.0.1:8767, controls at /__qa
-python tests/e2e_conversation/serve_fixture.py --tasks
+python -m tests.e2e_conversation.serve_fixture --tasks
 # http://127.0.0.1:8768, explicitly fake validated executor
 ```
 

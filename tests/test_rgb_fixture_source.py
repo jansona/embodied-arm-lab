@@ -1,7 +1,7 @@
 """Rendered-image integration: no fixture object poses or projected landmarks."""
-from rgb_coarse_fixture import RGBColourFixture
-from so101_control import CameraSceneSource
-from so101_simulation import SO101Simulation
+from tests.rgb_coarse_fixture import RGBColourFixture
+from embodied_arm.control.so101_control import CameraSceneSource
+from embodied_arm.simulation.so101_simulation import SO101Simulation
 
 
 def test_actual_rendered_640_rgb_fixture_full_scene_passes_unchanged_gates():
@@ -21,7 +21,7 @@ def test_actual_rendered_640_rgb_fixture_full_scene_passes_unchanged_gates():
 
 def test_coarse_fixture_rejects_two_compact_same_colour_candidates():
     import base64
-    from test_rgb_face_refinement import image_bytes
+    from tests.test_rgb_face_refinement import image_bytes
     raw = image_bytes(duplicate=True)
     packet = {'frame_id':'duplicate1','captured_at':1.,'images':[
         {'camera_id':cam,'width':640,'height':480,

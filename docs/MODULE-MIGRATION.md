@@ -1,0 +1,65 @@
+# 模块与命令迁移
+本次迁移删除根目录实现文件，不提供兼容导入别名。使用以下包路径。
+## 应用入口
+- SO101：`python -m embodied_arm`
+- Panda 预览：`python -m uvicorn embodied_arm.web.app:app --host 127.0.0.1 --port 8765`
+- Panda 会话：`python -m embodied_arm.runtime.start_session`
+- 模型 worker：`python -m embodied_arm.runtime.brain_worker --help`（vision_worker、so101_worker 同理）
+- 独立实验：`python -m experiments.<模块名>`
+- 源码打包：`python -m tools.package_so101 /tmp/embodied-arm-source.zip`
+
+## 原模块 → 当前包模块
+- `adapters` → `embodied_arm.providers.adapters`
+- `app` → `embodied_arm.web.app`
+- `app_so101` → `embodied_arm.web.app_so101`
+- `brain` → `embodied_arm.providers.brain`
+- `brain_ipc` → `embodied_arm.runtime.brain_ipc`
+- `brain_worker` → `embodied_arm.runtime.brain_worker`
+- `camera_perception` → `embodied_arm.perception.camera_perception`
+- `closure_acquisition_experiment` → `tests.closure_acquisition_experiment`
+- `connectivity` → `embodied_arm.providers.connectivity`
+- `continue_final_stack` → `embodied_arm.legacy.panda.continue_final_stack`
+- `continue_stack` → `embodied_arm.legacy.panda.continue_stack`
+- `control` → `embodied_arm.legacy.panda.control`
+- `embodied_arm.contracts` → `embodied_arm.services.contracts`
+- `embodied_arm.jev_motion` → `embodied_arm.control.jev_motion`
+- `embodied_arm.landmark_memory` → `embodied_arm.perception.landmark_memory`
+- `embodied_arm.manipulation` → `embodied_arm.control.manipulation`
+- `embodied_arm.phase_observer` → `embodied_arm.perception.phase_observer`
+- `embodied_arm.task_service` → `embodied_arm.services.task_service`
+- `embodied_arm.visual_feedback` → `embodied_arm.perception.visual_feedback`
+- `evaluate` → `experiments.evaluate`
+- `front_stereo_experiment` → `tests.front_stereo_experiment`
+- `held_camera_sweep` → `tests.held_camera_sweep`
+- `held_rgb_diagnostics` → `tests.held_rgb_diagnostics`
+- `illumination_experiment` → `tests.illumination_experiment`
+- `inference_worker` → `embodied_arm.runtime.inference_worker`
+- `ipc` → `embodied_arm.runtime.ipc`
+- `microcontrol_experiment` → `embodied_arm.legacy.panda.microcontrol_experiment`
+- `rgb_coarse_packet` → `embodied_arm.perception.rgb_coarse_packet`
+- `rgb_face_refinement` → `embodied_arm.perception.rgb_face_refinement`
+- `rgb_region_tracker` → `embodied_arm.perception.rgb_region_tracker`
+- `rgb_roi_geometry` → `embodied_arm.perception.rgb_roi_geometry`
+- `rgb_scaled_refinement` → `embodied_arm.perception.rgb_scaled_refinement`
+- `rgb_semantic_colour` → `embodied_arm.perception.rgb_semantic_colour`
+- `runner` → `embodied_arm.legacy.panda.runner`
+- `sequence_executor` → `embodied_arm.legacy.panda.sequence_executor`
+- `simulator` → `embodied_arm.simulation.simulator`
+- `so101_control` → `embodied_arm.control.so101_control`
+- `so101_executor` → `embodied_arm.control.so101_executor`
+- `so101_ipc` → `embodied_arm.runtime.so101_ipc`
+- `so101_jev` → `embodied_arm.providers.so101_jev`
+- `so101_robot` → `embodied_arm.simulation.so101_robot`
+- `so101_simulation` → `embodied_arm.simulation.so101_simulation`
+- `so101_uncertainty` → `embodied_arm.perception.so101_uncertainty`
+- `so101_visual_feedback` → `embodied_arm.perception.so101_visual_feedback`
+- `so101_worker` → `embodied_arm.runtime.so101_worker`
+- `stack_plans` → `embodied_arm.legacy.panda.stack_plans`
+- `start_session` → `embodied_arm.runtime.start_session`
+- `start_so101` → `embodied_arm.runtime.start_so101`
+- `survey_so101_grasp_envelope` → `experiments.survey_so101_grasp_envelope`
+- `survey_so101_grasp_visibility` → `experiments.survey_so101_grasp_visibility`
+- `task_executor` → `embodied_arm.legacy.panda.task_executor`
+- `vision_adapter` → `embodied_arm.providers.vision_adapter`
+- `vision_ipc` → `embodied_arm.runtime.vision_ipc`
+- `vision_worker` → `embodied_arm.runtime.vision_worker`

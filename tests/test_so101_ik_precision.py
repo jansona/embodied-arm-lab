@@ -1,7 +1,7 @@
 """Numerical IK and bounded real-servo settling, independent of scene GT."""
 import numpy as np
 import pytest
-from so101_simulation import SO101Simulation
+from embodied_arm.simulation.so101_simulation import SO101Simulation
 
 
 @pytest.mark.parametrize('xyz',[[.2,0,.06],[.19,-.05,.06],[.25,.055,.06],

@@ -3,8 +3,8 @@ import hashlib
 import json
 import time
 import pytest
-from continue_final_stack import load_final_checkpoint,run_final
-from test_continue_stack import fixture_files
+from embodied_arm.legacy.panda.continue_final_stack import load_final_checkpoint,run_final
+from tests.test_continue_stack import fixture_files
 
 def fixture(tmp_path):
     _,_,state,record=fixture_files(tmp_path)

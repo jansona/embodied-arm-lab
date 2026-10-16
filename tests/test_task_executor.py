@@ -1,9 +1,9 @@
 import time
 import threading
 import pytest
-from simulator import Simulation
-from task_executor import TaskExecutor, validate_plan, plan_from_intent
-from adapters import Decision
+from embodied_arm.simulation.simulator import Simulation
+from embodied_arm.legacy.panda.task_executor import TaskExecutor, validate_plan, plan_from_intent
+from embodied_arm.providers.adapters import Decision
 
 @pytest.mark.parametrize('bad',[{}, {'steps':[]},{'steps':[{'action':'exec','code':'bad'}]}, {'steps':[{'action':'move','target_xyz':[.4,0,float('nan')]}]}, {'steps':[{'action':'lift','height_m':1}]}])
 def test_invalid_plans(bad):

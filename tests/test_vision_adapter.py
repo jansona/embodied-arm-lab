@@ -9,9 +9,9 @@ import httpx
 from PIL import Image
 import pytest
 
-from brain import MODEL, ENDPOINT
-from camera_perception import PixelDetection
-from vision_adapter import QwenVision, frame_snapshot, request_preview, validate_detections, sanitize_diagnostic, convert_provider_detections
+from embodied_arm.providers.brain import MODEL, ENDPOINT
+from embodied_arm.perception.camera_perception import PixelDetection
+from embodied_arm.providers.vision_adapter import QwenVision, frame_snapshot, request_preview, validate_detections, sanitize_diagnostic, convert_provider_detections
 
 
 def frame():
@@ -143,7 +143,7 @@ def test_no_substitute_model_and_truncation():
 
 
 def test_post_response_staleness(monkeypatch):
-    import vision_adapter
+    import embodied_arm.providers.vision_adapter as vision_adapter
     packet=frame();clock=[packet['captured_at']]
     monkeypatch.setattr(vision_adapter.time,'monotonic',lambda:clock[0])
     def handle(_):

@@ -1,6 +1,6 @@
 """Real servo setpoints ramp over 360 physics ticks, without changing friction."""
 import pytest
-from so101_simulation import SO101Simulation
+from embodied_arm.simulation.so101_simulation import SO101Simulation
 
 
 def test_gripper_open_close_smoothstep_duration_and_limits(monkeypatch):

@@ -3,10 +3,10 @@ import json
 import math
 import pytest
 import httpx
-from adapters import ACTIONS, JevAdapter
-from runner import JevRunner
-from control import observation
-from test_runner import FakeSim, wait_done
+from embodied_arm.providers.adapters import ACTIONS, JevAdapter
+from embodied_arm.legacy.panda.runner import JevRunner
+from embodied_arm.legacy.panda.control import observation
+from tests.test_runner import FakeSim, wait_done
 
 @pytest.mark.parametrize('axis,sign',[(0,1),(0,-1),(1,1),(1,-1),(2,1),(2,-1)])
 def test_mock_local_target_loop(axis,sign,monkeypatch):
@@ -18,7 +18,7 @@ def test_mock_local_target_loop(axis,sign,monkeypatch):
         state["objective"]={"id":"hover_reach","target_xyz":target,"tolerance_m":.01}
         state["workspace"]=[[.25,.7],[-.35,.35],[.022,.6]]
         return state
-    monkeypatch.setattr("runner.observation",local_observation)
+    monkeypatch.setattr('embodied_arm.legacy.panda.runner.observation',local_observation)
     def respond(request):
         body=json.loads(request.content)
         current=body['state']['current_xyz_m']
