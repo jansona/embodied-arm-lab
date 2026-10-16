@@ -267,12 +267,12 @@ def validate_feedback(previous_plan, feedback, scene):
     if isinstance(previous_plan, BrainPlan):
         previous_plan = previous_plan.to_dict()
     previous = validate_plan(previous_plan, scene, check_state=False)
-    if previous.action != 'sequence':
-        raise ValueError('Repair requires a symbolic sequence')
+    if previous.action not in ('sequence', 'pick', 'place'):
+        raise ValueError('Repair requires an actionable plan')
     if not isinstance(feedback, dict) or set(feedback) != {'completed_step_ids','failed_step_id','reason'}:
         raise ValueError('Invalid feedback fields')
     completed, failed, reason = (feedback[k] for k in ('completed_step_ids','failed_step_id','reason'))
-    ids = [step.step_id for step in previous.steps]
+    ids = [step.step_id for step in previous.steps] if previous.action == 'sequence' else ['s1']
     if not isinstance(completed, list) or completed != ids[:len(completed)] or len(completed) >= len(ids):
         raise ValueError('Completed steps must be an ordered prefix')
     if failed != ids[len(completed)] or not isinstance(reason, str) or reason not in FEEDBACK_REASONS:

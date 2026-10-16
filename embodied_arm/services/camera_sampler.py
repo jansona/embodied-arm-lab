@@ -29,7 +29,8 @@ class CameraSampler:
                 now=self.clock()
                 if self.last_attempt_at is not None and now-self.last_attempt_at<self.interval:return
                 self.last_attempt_at=now;self.capturing=True
-            packet=self.sim.capture_frames()
+            capture=getattr(self.sim,'capture_preview_frames',self.sim.capture_frames)
+            packet=capture()
             pair={key:packet[key] for key in ('frame_id','captured_at','images')}
             images=pair['images']
             if (len(images)!=2 or {x['camera_id'] for x in images}!={'left','right'}

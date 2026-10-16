@@ -67,7 +67,12 @@ class SO101Session:
             brain_ready=bool(brain_status.get('available',brain_status.get('configured',False)))
             workflow=self.task_service.status()
             chat_state={'queued':'thinking','planning':'thinking','completed':'ready','failed':'error','blocked':'error'}.get(workflow['state'],workflow['state'])
-            return {'schema':'so101-ui-v1','robot':self.sim.proprioception(),'camera':self.camera.status(),
+            return {'schema':'so101-ui-v1','robot':self.sim.proprioception(),'camera':{**self.camera.status(),
+                    'perception_resolution':list(getattr(self.sim,'camera_size',())),
+                    'preview_resolution':[640,480] if hasattr(self.sim,'capture_preview_frames') else None,
+                    'illumination_profile':getattr(self.sim,'illumination_profile','unspecified'),
+                    'refinement_profile':perception.get('refinement_profile'),
+                    'roi_tracking':perception.get('roi_tracking',False)},
                 'perception':{**perception,'configured':bool(vision.get('available',vision.get('configured',False))),
                     'status':'ready' if fresh else perception.get('reason','unconfigured'),
                     'model':vision.get('model','qwen3.8-max'),'provenance':(perception.get('last_vision') or {}).get('provenance','none'),
@@ -183,13 +188,13 @@ class SO101Session:
             if self.brain and hasattr(self.brain,'cancel'):self.brain.cancel()
             self.sim.stop();self.sim.close()
 
-def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None,camera_interval_seconds=1.):
+def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,controller=None,enable_waypoint=False,executor_factory=None,task_executor=None,task_executor_factory=None,camera_interval_seconds=1.,enable_simulation_tasks=False):
     @asynccontextmanager
     async def lifespan(app):
         factory=sim_factory
         if factory is None:
             from embodied_arm.simulation.so101_simulation import SO101Simulation
-            factory=SO101Simulation
+            factory=(lambda seed: SO101Simulation(seed=seed,camera_size=(1920,1440),illumination_profile="shadow_free_rgb_v1")) if enable_simulation_tasks else SO101Simulation
         vision_client=vision;brain_client=brain;controller_client=controller
         if sim_factory is None:
             if controller_client is None:
@@ -201,7 +206,16 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
             if brain_client is None:
                 from embodied_arm.runtime.brain_ipc import FileBrainBridge
                 brain_client=FileBrainBridge()
-        session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory,task_executor=task_executor,task_executor_factory=task_executor_factory,camera_interval_seconds=camera_interval_seconds);session.sim.stop();app.state.session=session
+        selected_executor_factory=task_executor_factory
+        selected_source_factory=source_factory
+        if enable_simulation_tasks:
+            if task_executor is not None or task_executor_factory is not None:raise ValueError('Experimental factory cannot be overridden')
+            from embodied_arm.control.manipulation import simulation_task_executor
+            selected_executor_factory=simulation_task_executor
+            if source_factory is None:
+                from embodied_arm.control.so101_control import CameraSceneSource
+                selected_source_factory=lambda sim,vision:CameraSceneSource(sim,vision=vision,refine_rgb=True,refinement_profile='scaled',roi_tracking=True)
+        session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=selected_source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory,task_executor=task_executor,task_executor_factory=selected_executor_factory,camera_interval_seconds=camera_interval_seconds);session.sim.stop();app.state.session=session
         session.camera.start()
         def physics():
             last=time.monotonic();accumulator=0.
@@ -253,5 +267,5 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
         except ValueError as exc:raise HTTPException(409,detail=str(exc)) from None
     return app
 
-app=create_app(enable_waypoint=os.environ.get('SO101_ENABLE_WAYPOINT')=='1',
+app=create_app(enable_simulation_tasks=os.environ.get('SO101_SIMULATION_TASKS')=='1',enable_waypoint=os.environ.get('SO101_ENABLE_WAYPOINT')=='1',
     camera_interval_seconds=float(os.environ.get('SO101_CAMERA_INTERVAL','1')))

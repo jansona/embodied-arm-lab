@@ -22,9 +22,9 @@ class JevMotionDriver:
 
     def move_to(self, target_xyz, covariance_m2, *, cancel_event=None,
                 max_calls=48, deadline=None, event_callback=None,
-                before_decision=None, after_motion=None):
+                before_decision=None, after_motion=None, target_update=None):
         return self._run('cartesian', target_xyz, covariance_m2, cancel_event,
-                         max_calls, deadline, event_callback, before_decision, after_motion)
+                         max_calls, deadline, event_callback, before_decision, after_motion, target_update)
 
     def gripper(self, target_openness, *, cancel_event=None, max_calls=1,
                 deadline=None, event_callback=None, before_decision=None, after_motion=None):
@@ -74,12 +74,14 @@ class JevMotionDriver:
     @staticmethod
     def _perception_callback(callback):
         try:
-            if callback() is False:
+            observation=callback()
+            if observation is False:
                 raise ValueError('Rejected observation')
+            return observation
         except Exception:
             raise ValueError('perception_rejected') from None
 
-    def _run(self, kind, target, covariance, cancel, max_calls, deadline, callback, before_decision, after_motion):
+    def _run(self, kind, target, covariance, cancel, max_calls, deadline, callback, before_decision, after_motion, target_update=None):
         result = {'status':'stopped', 'reason':'unavailable', 'calls':0, 'actions':0,
                   'controller':'jev', 'provenance':getattr(self.controller, 'provenance', 'unverified'),
                   'source':'caller_rgb_target', 'grasp_verified':False,
@@ -106,9 +108,38 @@ class JevMotionDriver:
                 covariance = covariance.tolist()
             elif type(target) not in (int,float) or target not in (0,1):
                 raise ValueError('invalid_target')
-            for _ in range(max_calls+1):
+            if target_update is not None and (kind!='cartesian' or before_decision is None):
+                raise ValueError('invalid_target_update')
+            for iteration in range(max_calls+1):
                 self._check(cancel, deadline)
+                before_capture=self._robot()
+                observation_snapshot=self._perception_callback(before_decision) if before_decision else None
+                self._check(cancel,deadline)
+                self._unchanged(before_capture)
+                if target_update is not None:
+                    updated=target_update(observation_snapshot)
+                    if not isinstance(updated,dict) or set(updated)!={'target_xyz','covariance_m2'}:
+                        raise ValueError('invalid_target_update')
+                    new_target=updated['target_xyz'];new_covariance=np.asarray(updated['covariance_m2'],dtype=float)
+                    if (not isinstance(new_target,(list,tuple)) or len(new_target)!=3
+                            or any(type(x) not in (int,float) or not math.isfinite(x) for x in new_target)
+                            or new_covariance.shape!=(3,3) or not np.isfinite(new_covariance).all()
+                            or not np.allclose(new_covariance,new_covariance.T,atol=1e-12,rtol=0)
+                            or np.linalg.eigvalsh(new_covariance).min() < -1e-15):
+                        raise ValueError('invalid_target_update')
+                    target=list(new_target);covariance=new_covariance.tolist()
+                self._unchanged(before_capture)
                 robot = self._robot()
+                scene=observation_snapshot.get('scene',{}) if isinstance(observation_snapshot,dict) else {}
+                captured_at=scene.get('captured_at')
+                age=self.clock()-captured_at if type(captured_at) in (int,float) else None
+                if age is not None and (not math.isfinite(age) or not 0<=age<=3):raise ValueError('perception_rejected')
+                if callback:
+                    callback({'phase':'observation','iteration':iteration,'kind':kind,
+                              'frame_ids':scene.get('frame_ids'),'observation_age_seconds':age,
+                              'goal':list(target) if kind=='cartesian' else target,
+                              'calls':result['calls'],'actions':result['actions']})
+                self._check(cancel,deadline)
                 if kind == 'cartesian':
                     if any(not lo<=x<=hi for x,(lo,hi) in zip(target,robot['workspace'])):
                         raise ValueError('target_outside_workspace')
@@ -118,6 +149,8 @@ class JevMotionDriver:
                         raise ValueError('precision_floor')
                     if all(b['status']=='inside' for b in bands):
                         result.update(status='completed',reason='estimated_uncertainty_envelope_within_tolerance')
+                        if callback:callback({'phase':'local_goal_verified','iteration':iteration,'calls':result['calls'],'actions':result['actions']})
+                        self._check(cancel,deadline)
                         return result
                     if not any(b['status']=='outside' for b in bands):
                         raise ValueError('uncertainty_unresolved')
@@ -128,8 +161,6 @@ class JevMotionDriver:
                     local = {'source':'rgb_only','kind':kind,'target_openness':target,'tolerance':.02}
                 if result['calls'] >= max_calls:
                     raise ValueError('call_budget_exhausted')
-                if before_decision:
-                    self._perception_callback(before_decision)
                 self._check(cancel,deadline)
                 self._unchanged(robot)
                 observation = build_observation(local,robot,axis)
@@ -138,13 +169,17 @@ class JevMotionDriver:
                 decision = validate_decision(raw.to_dict() if hasattr(raw,'to_dict') else raw, observation)
                 self._check(cancel,deadline)
                 if callback:
-                    callback({'phase':'jev_decision','kind':kind,'axis_index':axis,
+                    callback({'phase':'jev_decision','iteration':iteration,'kind':kind,'axis_index':axis,
                               'accepted':decision.accepted,'action':decision.action,
-                              'confidence':decision.confidence,'provenance':result['provenance']})
+                              'confidence':decision.confidence,'provenance':result['provenance'],
+                              'calls':result['calls'],'actions':result['actions']})
                 self._check(cancel,deadline)
                 self._unchanged(robot)
                 if not decision.accepted:
                     raise ValueError('controller_rejected')
+                if captured_at is not None and (not math.isfinite(captured_at) or not 0<=self.clock()-captured_at<=3):
+                    if callback:callback({'phase':'decision_stale','iteration':iteration,'reason':'visual_observation_expired','calls':result['calls']})
+                    continue
                 if decision.action == 'hold':
                     if kind == 'gripper':
                         result.update(status='completed',reason='encoder_within_tolerance')
@@ -172,7 +207,7 @@ class JevMotionDriver:
                 if after_motion:
                     self._perception_callback(after_motion)
                 if callback:
-                    callback({'phase':'motion_completed','kind':kind,'actions':result['actions']})
+                    callback({'phase':'motion_completed','iteration':iteration,'kind':kind,'actions':result['actions'],'calls':result['calls'],'applied':True})
                 self._check(cancel,deadline)
                 if kind == 'gripper':
                     # A physical object can block closure before encoder zero.
@@ -182,8 +217,9 @@ class JevMotionDriver:
         except Exception as exc:
             allowed = {'cancelled','deadline','motion_timeout','robot_not_idle_paused',
                        'robot_changed_during_decision','robot_changed_during_motion','invalid_budget','invalid_target',
-                       'invalid_covariance','target_outside_workspace','uncertainty_unresolved',
+                       'invalid_covariance','invalid_target_update','target_outside_workspace','uncertainty_unresolved',
                        'call_budget_exhausted','controller_rejected','unsafe_step','perception_rejected','precision_floor'}
+            result['status'] = 'stopped'
             result['reason'] = str(exc) if str(exc) in allowed else 'motion_or_controller_error'
             self.sim.stop()
             return result

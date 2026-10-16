@@ -131,7 +131,7 @@ def test_callbacks_have_required_timing_and_fail_closed():
         assert sim.state['paused'] and not sim.state['busy'];order.append('after')
     result=motion.move_to([.217,0,.06],ZERO,before_decision=before,after_motion=after)
     assert result['status']=='completed'
-    assert order==['before','decide','after']*result['calls']
+    assert order==['before','decide','after']*result['calls']+['before']  # Fresh terminal evidence too.
     sim,jev,motion=driver()
     result=motion.gripper(0,before_decision=lambda:False)
     assert result['reason']=='perception_rejected' and result['calls']==0 and not sim.commands
@@ -213,3 +213,16 @@ def test_precision_floor_never_loosens_tolerance():
     covariance=[[.0011**2 if i==j else 0 for j in range(3)] for i in range(3)]
     result=motion.move_to([.22,0,.06],covariance)
     assert result['reason']=='precision_floor' and not sim.commands and not jev.requests
+
+@pytest.mark.parametrize('failure',['deadline','cancel','exception'])
+def test_terminal_observer_failure_never_returns_completed(failure):
+    now=[0.];cancel=threading.Event()
+    sim,jev,motion=driver(clock=lambda:now[0])
+    def event(detail):
+        if detail['phase']=='local_goal_verified':
+            if failure=='deadline':now[0]=11.
+            elif failure=='cancel':cancel.set()
+            else:raise ValueError('observer failed')
+    result=motion.move_to(sim.state['ee'],ZERO,deadline=10,cancel_event=cancel,event_callback=event)
+    assert result['status']=='stopped'
+    assert result['actions']==result['calls']==0

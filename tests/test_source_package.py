@@ -5,13 +5,17 @@ import pytest
 from tools import package_so101
 
 
+def split_template():
+    return {'schema_version': 2, 'brain': {'api_key': ''}, 'cerebellum': {'api_key': ''}}
+
+
 def test_package_includes_layout_and_excludes_local_runtime(tmp_path, monkeypatch):
     root = tmp_path / 'repo'
     root.mkdir()
     for name in ['README.md', 'pyproject.toml', 'requirements.txt']:
         (root / name).write_text('source')
     (root / 'config').mkdir()
-    (root / 'config/provider.example.json').write_text(json.dumps({'api_key': ''}))
+    (root / 'config/provider.example.json').write_text(json.dumps(split_template()))
     for name in ['embodied_arm', 'experiments', 'tools', 'tests', 'docs', 'scripts']:
         (root / name).mkdir()
         (root / name / 'example.txt').write_text('source')
@@ -45,9 +49,12 @@ def test_package_includes_layout_and_excludes_local_runtime(tmp_path, monkeypatc
     assert not any('.runtime' in name or '.venv' in name or 'config.local' in name or name.endswith('/private.txt') for name in names)
 
 
-def test_nonempty_example_key_is_rejected(tmp_path, monkeypatch):
+@pytest.mark.parametrize('component', ['brain', 'cerebellum'])
+def test_nonempty_example_key_is_rejected(tmp_path, monkeypatch, component):
     (tmp_path / 'config').mkdir()
-    (tmp_path / 'config/provider.example.json').write_text(json.dumps({'api_key': 'dummy-value'}))
+    data=split_template()
+    data[component]['api_key']='dummy-value'
+    (tmp_path / 'config/provider.example.json').write_text(json.dumps(data))
     monkeypatch.setattr(package_so101, 'ROOT', tmp_path)
     with pytest.raises(ValueError, match='nonempty credential'):
         package_so101.package(tmp_path / 'not-created.zip')
@@ -63,3 +70,17 @@ def test_symlink_template_is_rejected_before_read(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match='Unsafe configuration template path'):
         package_so101.package(tmp_path / 'not-created.zip')
     assert not (tmp_path / 'not-created.zip').exists()
+
+
+def test_legacy_template_remains_explicitly_named_and_checked(tmp_path, monkeypatch):
+    (tmp_path/'config').mkdir()
+    legacy=tmp_path/'config/provider-legacy.example.json'
+    legacy.write_text(json.dumps({'api_key': ''}))
+    monkeypatch.setattr(package_so101, 'ROOT', tmp_path)
+    package_so101.package(tmp_path/'source.zip')
+    with zipfile.ZipFile(tmp_path/'source.zip') as archive:
+        assert 'jev-arm-sandbox/config/provider-legacy.example.json' in archive.namelist()
+    legacy.write_text(json.dumps({'api_key': 'dummy-value'}))
+    with pytest.raises(ValueError, match='nonempty credential'):
+        package_so101.package(tmp_path/'rejected.zip')
+    assert not (tmp_path/'rejected.zip').exists()

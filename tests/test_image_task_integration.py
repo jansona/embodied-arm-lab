@@ -40,6 +40,7 @@ def test_default_rgb_precision_blocks_before_physical_motion(monkeypatch):
         assert status['provenance']=='offline_fake_brain'
         assert sim.proprioception()['actions']==0
         assert all(r['target']['kind']=='gripper' for r in jev.requests)
+        assert 'outcome' in status, status
         assert status['outcome']['reason']=='precision_floor'
         assert status['outcome']['verified'] is False
     finally:sim.close()

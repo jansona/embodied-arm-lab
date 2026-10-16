@@ -63,3 +63,35 @@ Executed: 10 HTTP checks passed against the new automatic-observation implementa
 Executed through the supported cloud-browser interface: first red-cube instruction with no diagnostic clicks; visible observation/planning/non-motion structured plan; idle Stop disabled and active Stop enabled; stale-plan warning and on-demand refresh; unavailable vision message explicitly says no upload is needed; cancelled observation never produces a late plan; reload/reconnect; offline brain disables Send while preserving the editable draft. Local frame IDs advanced at approximately one second while provider counters stayed unchanged until a request.
 
 These results use MOCK scene and provider contracts, not real image recognition or Qwen/Jev. The image-only boundary was also reviewed in the production source: local sampling strips the packet to RGB frame fields, carries no provider handle, and simulator camera capture is serialized. Full real-provider/physical acceptance is outside this evidence. The Python Playwright runner remains unexecuted in this environment; do not equate authored/collected tests with browser-runner passes.
+
+## Bounded dynamic-loop acceptance (2026-10-16)
+
+Executed independently:
+
+```sh
+python -m pytest -q tests/e2e_conversation/test_dynamic_loop.py \
+  tests/test_jev_motion.py tests/test_task_service.py tests/test_brain.py \
+  tests/test_phase_visual_feedback.py tests/test_image_task_integration.py \
+  tests/test_so101_ui.py
+# 171 passed (31 new independent dynamic-loop checks)
+```
+
+The new checks exercise observation-before-decision, changed targets reversing the next Jev action, per-action motion bounds, stale/occluded evidence failing closed, cancellation, invalid covariance/targets, shared call/deadline budgets, exactly one permitted safe high-level repair, fresh repair context, no replan for unsafe outcomes, frame changes invalidating a repair, and explicit accounting. Four local observations do not produce four high-level model calls. Accepted but unverified motion never becomes task completion.
+
+Independent testing found and reproduced a late-result bug: an executor could return `verified:true` after the shared deadline and still complete. The implementation now rejects it with `time_budget`; the regression passed. Missing or invalid bounded-executor accounting also fails closed.
+
+Evidence labels matter: most tests use MOCK observations, a fake high-level brain and FakeJev/executor contracts. One test runs the real SO101 servo/physics with FakeJev and a synthetic moving target; it forbids evaluation-state access, joint/body teleport and constraint attachment during execution. It proves corrective servo motion, not image-derived target accuracy or successful grasping. Existing image-integration tests supply separate rendered-RGB fail-closed evidence. These checks do not establish a full successful RGB→Qwen→Jev pick/place task, and no live API was called. No new browser-runner result is claimed for this dynamic-loop checkpoint.
+
+Final focused rerun: 32 dynamic-loop checks passed after adding a preclose regression. A fresh 12 mm visual-object displacement from an initially aligned encoder pose rejects gripper closure alignment; this uses a synthetic RGB estimate contract, not simulator object ground truth. The builder added the corresponding preclose guard following independent review.
+
+## Production HTTP / IPC / physics path (2026-10-16)
+
+```sh
+python -m pytest -q -s tests/e2e_conversation/test_production_http_loop.py
+```
+
+Executed final run: passed in 90.60 seconds (including expiration of the bounded isolated IPC worker). The HTTP task traversed the production app factory, QwenVision parser, scaled RGB refinement, QwenBrain parser, manipulation executor, FileSO101Bridge, worker, SO101JevAdapter parser and real SO101 physics. Only external provider HTTP responses used MockTransport; no fake application executor/source/simulation was injected. Placeholder keys are non-secret test strings, and no network/model account was accessed.
+
+Observed: one vision request, one planning request, twelve Jev decisions, ten physical simulation actions. During descent, static RGB association rejected initial-anchor drift; one stationary re-observation failed, and the task ended `execution_unverified` / `perception_rejected`, with `verified:false`. This proves the execution path can move and report a safe failure, not successful grasping or live model quality. Earlier runs included one pre-motion failure with an unavailable truncated diagnostic, one action-producing pass, and one artificial 40-second test timeout; therefore this is not a timing-stability claim. Final test bounds are a 75-second wait and 90-second IPC lease; production safety gates were not relaxed.
+
+Separate supported cloud-browser check on a FAKE application fixture: primary execute enabled when ready; idle Stop disabled; Enter submitted execution without diagnostic buttons; active Stop cancelled and late results did not complete; structured plan and execution logs visible; original model text explicitly labeled a proposal; offline Enter preserved the draft and made no additional request. The Python Playwright runner remains unexecuted. QA tabs and the new isolated port8771 fixture were closed afterward.

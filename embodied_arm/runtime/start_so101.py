@@ -33,7 +33,7 @@ def commands(*, live=False, config=None, workers_only=False, port=8766):
             raise ValueError('Configuration must remain outside the project')
         for script, calls, seconds in [('brain_worker.py', 6, 600),
                                         ('vision_worker.py', 6, 600),
-                                        ('so101_worker.py', 12, 180)]:
+                                        ('so101_worker.py', 120, 420)]:
             jobs.append(['-m', 'embodied_arm.runtime.' + script.removesuffix('.py'), '--config', str(path), '--max-calls', str(calls),
                          '--max-seconds', str(seconds)])
     return [[sys.executable, *job] for job in jobs]
@@ -41,7 +41,7 @@ def commands(*, live=False, config=None, workers_only=False, port=8766):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--live', action='store_true', help='Start bounded workers; explicit UI requests may incur provider charges')
+    parser.add_argument('--live', action='store_true', help='Enable experimental simulator tasks and bounded workers; explicit UI requests may incur provider charges')
     parser.add_argument('--config', help='Existing provider configuration outside this repository')
     parser.add_argument('--workers-only', action='store_true', help='Only workers, when UI already runs in a supported execution context')
     parser.add_argument('--enable-waypoint', action='store_true', help='Enable experimental image-guided hover; not grasp or stack')
@@ -61,7 +61,8 @@ def main(argv=None):
         stop = True
     signal.signal(signal.SIGINT, interrupt)
     signal.signal(signal.SIGTERM, interrupt)
-    env = {**os.environ, 'SO101_ENABLE_WAYPOINT': '1' if args.enable_waypoint else '0', 'SO101_CAMERA_INTERVAL':str(args.camera_interval)}
+    env = {**os.environ, 'SO101_ENABLE_WAYPOINT': '1' if args.enable_waypoint else '0', 'SO101_CAMERA_INTERVAL':str(args.camera_interval),
+           'SO101_SIMULATION_TASKS':'1' if args.live else '0'}
     exit_code = 0
     try:
         for job in jobs:
@@ -69,9 +70,10 @@ def main(argv=None):
         if not args.workers_only:
             print(f'SO101: http://127.0.0.1:{args.port} (loopback only)', flush=True)
         if args.live:
-            print('Live window: Qwen 6 calls/600s; vision 6 calls/600s; Jev 12 calls/180s. No automatic renewal.', flush=True)
+            print('Live window: Qwen 6 calls/600s; vision 6 calls/600s; Jev 120 calls/420s. No automatic renewal.', flush=True)
+            print('Experimental simulator tasks: at most 120 Jev calls/300s per task; runtime guards may stop execution. No physical hardware control.', flush=True)
         else:
-            print('Preview mode: no inference workers started.', flush=True)
+            print('Preview mode: simulator task execution disabled; no inference workers started.', flush=True)
         print('Ctrl+C stops all processes started by this launcher.', flush=True)
         reported_expiry = False
         while not stop:

@@ -25,4 +25,4 @@ def control(action:str):
     elif action=='expire':brain.available=False
     elif action=='reconnect':brain.available=True
     return RedirectResponse('/__qa',status_code=303)
-if __name__=='__main__':uvicorn.run(app,host='127.0.0.1',port=8768 if '--tasks' in sys.argv else 8767,log_level='warning')
+if __name__=='__main__':uvicorn.run(app,host='127.0.0.1',port=int(sys.argv[sys.argv.index('--port')+1]) if '--port' in sys.argv else (8768 if '--tasks' in sys.argv else 8767),log_level='warning')

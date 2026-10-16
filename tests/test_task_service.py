@@ -80,3 +80,13 @@ def test_reply_cannot_be_bound_to_a_different_newer_image():
  brain=Mutating('pick');service=TaskService(scene_source=source,brain=brain,executor=None)
  service.submit('夹起红块',execute=False);result=wait(service)
  assert result['error']=='scene_stale' and result['plan'] is None and not result['plan_fresh']
+
+def test_live_controller_telemetry_updates_before_executor_returns():
+ class Live(Executor):
+  def bounded_execute(self,plan,**kwargs):
+   kwargs['event_callback']({'phase':'motion_completed','calls':2,'actions':1})
+   assert service.status()['controller_calls']==2
+   return {'verified':True,'calls':2,'actions':1}
+ service=TaskService(scene_source=Source(),brain=Brain('pick'),executor=Live())
+ service.submit('拿红块');result=wait(service)
+ assert result['state']=='completed' and result['controller_calls']==2

@@ -77,8 +77,8 @@ class SO101Simulation:
                         physics_steps=self.steps,status=self.status,error=self.error,origin=self.origin,
                         workspace=[list(x) for x in WORKSPACE],cube_edge_m=CUBE_EDGE)
             return safe
-    def _rgb(self,camera_id,roi=None):
-        eye,target=CAMERAS[camera_id];width,height=self.camera_size
+    def _rgb(self,camera_id,roi=None,render_size=None):
+        eye,target=CAMERAS[camera_id];width,height=render_size or self.camera_size
         view=p.computeViewMatrix(eye,target,[0,0,1]);proj=p.computeProjectionMatrixFOV(50,width/height,.01,2.)
         native_width,native_height=width,height
         if roi is not None:
@@ -92,19 +92,26 @@ class SO101Simulation:
             canvas[roi[1]:roi[3],roi[0]:roi[2]]=rgb;rgb=canvas
         out=BytesIO();Image.fromarray(rgb).save(out,format='JPEG',quality=92)
         return out.getvalue()
-    def capture_frames(self,*,roi_bounds=None):
+    def capture_frames(self,*,roi_bounds=None,render_size=None):
         with self.lock:
+            size=tuple(render_size or self.camera_size)
+            if size not in ((640,480),(1280,960),(1920,1440)):raise ValueError('Unsupported stereo resolution')
+            if roi_bounds is not None and render_size is not None:raise ValueError('ROI uses native calibration')
             if roi_bounds is not None and set(roi_bounds)!=set(CAMERAS):raise ValueError('Both stereo crop bounds required')
             frame_id=uuid.uuid4().hex;captured_at=time.monotonic();images=[]
             for camera_id in CAMERAS:
-                jpeg=self._rgb(camera_id,None if roi_bounds is None else roi_bounds[camera_id])
-                images.append({'camera_id':camera_id,'width':self.camera_size[0],'height':self.camera_size[1],
+                jpeg=self._rgb(camera_id,None if roi_bounds is None else roi_bounds[camera_id],render_size=size)
+                images.append({'camera_id':camera_id,'width':size[0],'height':size[1],
                                'data_url':'data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii')})
                 if roi_bounds is None:self._renders[camera_id]=(time.monotonic(),jpeg)
             packet={'frame_id':frame_id,'captured_at':captured_at,'images':images,
-                    'calibrations':[camera_calibration(k,*self.camera_size) for k in CAMERAS]}
+                    'calibrations':[camera_calibration(k,*size) for k in CAMERAS]}
             if roi_bounds is not None:packet.update(capture_profile='native_coordinate_roi_canvas',observed_roi_bounds=roi_bounds)
             return packet
+    def capture_preview_frames(self):
+        # Same two cameras/FOV, cheaper display frames. Perception keeps native calibration.
+        return self.capture_frames(render_size=(640,480))
+
     def render(self,camera_id='left'):
         if camera_id not in CAMERAS:raise ValueError('Unknown RGB camera')
         with self.lock:

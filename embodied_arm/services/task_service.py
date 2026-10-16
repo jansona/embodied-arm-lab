@@ -16,7 +16,12 @@ OBSERVATION_ERRORS = {'vision_unavailable','network_error','timeout','expired','
 
 class TaskService:
 
-    def __init__(self, *, scene_source, brain, executor, clock=time.monotonic):
+    def __init__(self, *, scene_source, brain, executor, clock=time.monotonic, max_replans=1, max_controller_calls=120, max_seconds=300):
+        if type(max_replans) is not int or not 0 <= max_replans <= 1 or type(max_controller_calls) is not int or not 1 <= max_controller_calls <= 200 or not 1 <= max_seconds <= 420:
+            raise ValueError("invalid_budget")
+        self.max_replans=max_replans
+        self.max_controller_calls=max_controller_calls
+        self.max_seconds=max_seconds
         self.source = scene_source
         self.brain = brain
         self.executor = executor
@@ -30,7 +35,7 @@ class TaskService:
         self.record = {'id': None, 'state': 'idle', 'events': [], 'plan': None, 'error': None, 'execute': False}
 
     def execution_readiness(self):
-        if not self.executor or not getattr(self.executor,'validated',False):
+        if not self.executor or not (getattr(self.executor,'validated',False) or getattr(self.executor,'experimental_simulation',False)):
             return {'available':False,'reason':'visual_execution_not_validated'}
         readiness=getattr(self.executor,'readiness',None)
         return readiness() if readiness else {'available':True,'reason':None}
@@ -42,7 +47,7 @@ class TaskService:
             if self.plan_binding is not None:
                 try:plan_fresh=self._binding(self.source.snapshot())==self.plan_binding
                 except ValueError:pass
-            return deepcopy({**self.record, 'plan_fresh':plan_fresh, 'history': self.history, 'pending': bool(self.thread and self.thread.is_alive()), 'execution_available': ready['available'], 'unavailable_reason': ready['reason']})
+            return deepcopy({**self.record, 'plan_fresh':plan_fresh, 'history': self.history, 'pending': bool(self.thread and self.thread.is_alive()), 'execution_validation':'experimental_simulation' if getattr(self.executor,'experimental_simulation',False) else 'validated' if getattr(self.executor,'validated',False) else 'unvalidated', 'execution_available': ready['available'], 'unavailable_reason': ready['reason']})
 
     @staticmethod
     def _binding(snapshot):
@@ -75,7 +80,7 @@ class TaskService:
             self.plan_binding=None
             generation = self.generation
             self.cancel_event = threading.Event()
-            self.record = {'id': uuid.uuid4().hex, 'state': 'queued', 'events': [], 'plan': None, 'error': None, 'execute': execute, 'motion_executed':False}
+            self.record = {'id': uuid.uuid4().hex, 'state': 'queued', 'events': [], 'plan': None, 'error': None, 'execute': execute, 'motion_executed':False, 'replans':0, 'controller_calls':0}
             history = deepcopy(self.history[-6:])
             self.history.append({'role': 'user', 'content': text.strip()})
             self.history = self.history[-20:]
@@ -85,6 +90,7 @@ class TaskService:
 
     def _run(self, generation, text, execute, history, cancel):
         phase = 'planning'
+        deadline=self.clock()+self.max_seconds
         try:
             scene = UNKNOWN_SCENE
             ensure=getattr(self.source,'ensure_brain_scene',None)
@@ -103,10 +109,12 @@ class TaskService:
             phase = 'planning'
             if not self._event(generation, phase):
                 return
+            if self.clock() >= deadline:raise ValueError('time_budget')
             input_binding=self._binding(self.source.snapshot()) if scene!=UNKNOWN_SCENE else None
             result = self.brain.interpret(text, scene, history)
             if cancel.is_set():
                 return
+            if self.clock() >= deadline:raise ValueError('time_budget')
             if not result.accepted or result.plan is None:
                 raise ValueError('brain_rejected')
             if scene!=UNKNOWN_SCENE:
@@ -135,9 +143,71 @@ class TaskService:
             phase = 'executing'
             if not self._event(generation, phase):
                 return
-            outcome = self.executor.execute(plan, cancel_event=cancel, event_callback=lambda detail: self._event(generation, 'executing', detail))
-            if cancel.is_set():
-                return
+            total_calls=0
+            total_actions=0
+            repairs=0
+            bounded=getattr(self.executor,'bounded_execute',None)
+            while True:
+                if cancel.is_set():return
+                if self.clock() >= deadline:raise ValueError('time_budget')
+                remaining=self.max_controller_calls-total_calls
+                if remaining <= 0:raise ValueError('call_budget_exhausted')
+                def execution_event(detail, base_calls=total_calls, base_actions=total_actions):
+                    forwarded=deepcopy(detail)
+                    if isinstance(forwarded,dict):
+                        observed_calls=forwarded.get('calls');observed_actions=forwarded.get('actions')
+                        if type(observed_calls) is int and 0 <= observed_calls <= remaining:
+                            forwarded['calls']=base_calls+observed_calls
+                            with self.lock:
+                                if generation==self.generation and not cancel.is_set():
+                                    self.record['controller_calls']=forwarded['calls']
+                        if type(observed_actions) is int and observed_actions >= 0:
+                            forwarded['actions']=base_actions+observed_actions
+                    return self._event(generation,'executing',forwarded)
+                kwargs={'cancel_event':cancel, 'event_callback':execution_event}
+                outcome=bounded(plan,max_calls=remaining,deadline=deadline,**kwargs) if bounded else self.executor.execute(plan,**kwargs)
+                if cancel.is_set():return
+                if not isinstance(outcome,dict):raise ValueError('execution_unverified')
+                if bounded and not {'calls','actions'} <= set(outcome):raise ValueError('invalid_execution_budget')
+                used=outcome.get('calls',0); applied=outcome.get('actions',0)
+                if type(used) is not int or not 0 <= used <= remaining or type(applied) is not int or applied < 0:
+                    raise ValueError('invalid_execution_budget')
+                total_calls+=used;total_actions+=applied
+                with self.lock:
+                    if generation != self.generation:return
+                    self.record['controller_calls']=total_calls
+                    self.record['outcome']=deepcopy(outcome)
+                    self.record['motion_executed']=bool(total_actions)
+                if self.clock() >= deadline:raise ValueError('time_budget')
+                if outcome.get('verified') is True:break
+                recoverable=(bounded and outcome.get('recoverable') is True and outcome.get('safe_to_replan') is True
+                             and outcome.get('reason')=='scene_changed' and repairs < self.max_replans
+                             and total_calls < self.max_controller_calls and self.clock() < deadline)
+                if not recoverable:break
+                phase='replanning'
+                if not self._event(generation,phase,{'attempt':repairs+1,'reason':'scene_changed'}):return
+                ensure=getattr(self.source,'ensure_brain_scene',None)
+                if ensure:scene=ensure()
+                else:self.source.refresh();scene=self.source.brain_scene()
+                if cancel.is_set():return
+                if self.clock() >= deadline:raise ValueError('time_budget')
+                repair_binding=self._binding(self.source.snapshot())
+                result=self.brain.replan(text,scene,plan,{'completed_step_ids':[],'failed_step_id':'s1','reason':'scene_changed'},history)
+                repairs+=1
+                if cancel.is_set():return
+                if self.clock() >= deadline:raise ValueError('time_budget')
+                if not result.accepted or result.plan is None:raise ValueError('brain_rejected')
+                if self._binding(self.source.snapshot()) != repair_binding:raise ValueError('scene_stale')
+                plan=result.plan.to_dict()
+                if plan['action'] not in ('pick','place'):raise ValueError('unsupported_task')
+                with self.lock:
+                    if generation != self.generation:return
+                    self.record['replans']=repairs
+                    self.record['plan']=plan
+                    self.plan_binding=repair_binding
+                phase='executing'
+                if not self._event(generation,phase,{'attempt':repairs+1}):return
+            outcome={**outcome,'calls':total_calls,'actions':total_actions,'replans':repairs}
             if isinstance(outcome,dict):
                 with self.lock:
                     if generation==self.generation:
@@ -154,8 +224,8 @@ class TaskService:
         except Exception as exc:
             if cancel.is_set():
                 return
-            allowed = {'brain_rejected', 'unexpected_motion_plan', 'unsupported_task', 'execution_unverified'} | OBSERVATION_ERRORS
-            reason = str(exc) if str(exc) in allowed else {'observing': 'observation_unavailable', 'planning': 'planning_failed', 'executing': 'execution_failed'}[phase]
+            allowed = {'brain_rejected', 'unexpected_motion_plan', 'unsupported_task', 'execution_unverified','time_budget','invalid_execution_budget'} | OBSERVATION_ERRORS
+            reason = str(exc) if str(exc) in allowed else {'observing': 'observation_unavailable', 'planning': 'planning_failed', 'executing': 'execution_failed', 'replanning':'planning_failed'}[phase]
             with self.lock:
                 if generation == self.generation:
                     self.record['error'] = reason

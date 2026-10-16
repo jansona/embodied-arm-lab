@@ -17,7 +17,7 @@ def test_live_is_explicit_and_bounded(tmp_path):
     assert [job[-4:] for job in jobs[1:]] == [
         ['--max-calls', '6', '--max-seconds', '600'],
         ['--max-calls', '6', '--max-seconds', '600'],
-        ['--max-calls', '12', '--max-seconds', '180']]
+        ['--max-calls', '120', '--max-seconds', '420']]
     assert not (tmp_path / 'provider.json').exists()  # Builder never opens credentials.
 
 
@@ -97,3 +97,36 @@ def test_invalid_camera_interval_fails_before_launch(monkeypatch,value):
  import embodied_arm.runtime.start_so101 as launcher
  monkeypatch.setattr(launcher.subprocess,'Popen',lambda *a,**k:pytest.fail('Must not launch'))
  with pytest.raises(SystemExit):launcher.main(['--camera-interval',value])
+
+
+@pytest.mark.parametrize('live',[False,True])
+def test_simulation_task_switch_and_notice_are_explicit(monkeypatch,tmp_path,capsys,live):
+    import embodied_arm.runtime.start_so101 as launcher
+    launched=[]
+    class Child:
+        def __init__(self,command,**kwargs):
+            launched.append((command,kwargs))
+        def poll(self):return 0
+        def wait(self,timeout=None):return 0
+    monkeypatch.setattr(launcher.subprocess,'Popen',Child)
+    monkeypatch.setattr(launcher.signal,'signal',lambda *_:None)
+    # Neither an inherited enable nor an inherited disable overrides this launch.
+    monkeypatch.setenv('SO101_SIMULATION_TASKS','0' if live else '1')
+    args=['--live','--config',str(tmp_path/'external.json')] if live else []
+    assert launcher.main(args)==0
+    assert len(launched)==(4 if live else 1)
+    assert all(kwargs['env']['SO101_SIMULATION_TASKS']==('1' if live else '0') for _,kwargs in launched)
+    output=capsys.readouterr().out
+    if live:
+        assert '120 calls/420s' in output and '120 Jev calls/300s per task' in output
+        assert 'runtime guards may stop' in output and 'No physical hardware control' in output
+    else:
+        assert 'task execution disabled' in output
+    assert not (tmp_path/'external.json').exists()
+
+
+def test_explicit_simulation_budget_fits_worker_hard_caps(tmp_path):
+    from embodied_arm.runtime.so101_ipc import MAX_CALLS,MAX_SECONDS
+    job=commands(live=True,config=str(tmp_path/'external.json'))[-1]
+    assert int(job[job.index('--max-calls')+1])<=MAX_CALLS
+    assert int(job[job.index('--max-seconds')+1])<=MAX_SECONDS

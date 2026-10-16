@@ -50,7 +50,7 @@ def test_duplicate_fields_and_in_repo_paths_rejected_without_secret_echo(tmp_pat
  path=tmp_path/'duplicate.json';path.write_text('{"api_key":"secret","api_key":"other"}')
  with pytest.raises(ValueError) as e:load_configuration(path)
  assert 'secret' not in str(e.value)
- with pytest.raises(ValueError):load_configuration('config/provider-v2.example.json')
+ with pytest.raises(ValueError):load_configuration('config/provider.example.json')
 
 @pytest.mark.parametrize('component',['brain','cerebellum'])
 def test_each_connection_probe_uses_own_key_endpoint_model_and_one_call(component):
@@ -91,3 +91,19 @@ def test_invalid_runtime_timeout_cap_does_not_silently_disappear(tmp_path,cap):
  path=tmp_path/'providers.json';path.write_text(json.dumps(config()))
  with pytest.raises(ValueError):QwenBrain.from_config(path,timeout=cap)
  with pytest.raises(ValueError):SO101JevAdapter.from_config(path,timeout=cap)
+
+
+def test_canonical_example_uses_split_v2_schema_with_empty_keys():
+ from pathlib import Path
+ root=Path(__file__).resolve().parents[1]
+ data=json.loads((root/'config/provider.example.json').read_text())
+ assert set(data)=={'schema_version','brain','cerebellum'} and data['schema_version']==2
+ assert data['brain']['api_key']==data['cerebellum']['api_key']==''
+ assert data['brain']['model']=='qwen3.8-max'
+ assert data['cerebellum']['model']=='decision-model-preview'
+ # Validate only an in-memory copy with explicit fake credentials; no real config.
+ for component in ('brain','cerebellum'):data[component]['api_key']='FAKE-TEMPLATE-TEST'
+ assert set(parse_configuration(data))=={'brain','cerebellum'}
+ assert not (root/'config/provider-v2.example.json').exists()
+ legacy=json.loads((root/'config/provider-legacy.example.json').read_text())
+ assert 'schema_version' not in legacy and legacy['api_key']==''

@@ -49,7 +49,7 @@ def test_automatic_capture_is_distinct_from_paid_recognition_and_manual_is_optio
     assert '未执行动作' in values[4]
     assert 'id="vision-diagnostics"' in html
     assert html.index('id="vision-diagnostics"') < html.index('id="perceive"')
-    assert '发送（自动观察）' in html and '不调用付费模型' in html
+    assert '提交并执行任务' in html and '不调用付费模型' in html
     assert "setInterval(frames,1000)" in source
     assert "setInterval(()=>request('/api/observe'" not in source
 
@@ -91,3 +91,72 @@ def test_main_task_plan_is_visible_and_stop_tracks_active_work():
     value=json.loads(subprocess.check_output(['node','-e',script],text=True))
     assert '未执行动作' not in value['plan'] and '中断' in value['plan']
     assert '未确认任务完成' in value['execution']
+
+
+def test_closed_loop_events_do_not_confuse_decisions_or_waypoints_with_task_success():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    details=[{'phase':'observation','iteration':2,'frame_ids':{'left':'L2','right':'R2'},'observation_age_seconds':.2,'goal':[.1,.2,.3],'calls':4,'actions':3},
+             {'phase':'jev_decision','iteration':2,'accepted':True,'action':'x_minus','confidence':.98,'provenance':'fake_test'},
+             {'phase':'motion_completed','iteration':2,'applied':True,'actions':4},
+             {'phase':'decision_stale','iteration':3,'reason':'visual_observation_expired'},
+             {'phase':'local_goal_verified','iteration':4},{'attempt':1,'reason':'grasp_failed'}, {'phase':'observation_recovery','attempt':1,'reason':'fresh_rgb_rejected'}]
+    values=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify('+json.dumps(details)+'.map(formatEventDetail)));'],text=True))
+    assert '第 2 轮' in values[0] and '0.20 秒' in values[0] and 'L2 / R2' in values[0]
+    assert '不代表动作已执行或任务完成' in values[1] and 'fake_test' in values[1]
+    assert '等待新图像反馈' in values[2]
+    assert '未应用该决策' in values[3]
+    assert '整个任务尚需独立图像验证' in values[4]
+    assert '重新规划' in values[5] and '未通过图像验证' in values[5]
+    assert '静止重新观察' in values[6] and '尚未确认恢复' in values[6]
+    assert "flow.state==='completed'&&flow.outcome?.verified===true" in source
+    assert '这是该轮记录时的年龄' in source
+
+
+def test_primary_entry_executes_and_preview_is_explicitly_auxiliary():
+    root=Path(__file__).parent.parent/'embodied_arm/web/static_so101'
+    source=(root/'ui.js').read_text();html=(root/'index.html').read_text()
+    assert html.index('id="execution-readiness"') < html.index('id="request"')
+    assert html.index('id="task-send"') < html.index('id="preview-tools"') < html.index('id="send"')
+    assert '生成回复或计划预览，不执行' in html
+    assert "if(!$('task-send').disabled)$('task-send').click()" in source
+    assert "if(!$('send').disabled)$('send').click()" not in source
+    assert 'Qwen 建议原文（不代表系统执行状态）' in source
+    assert '没有任务排队，生成预览也不会自动启动' in source
+    code=source[:source.index('async function state()')]
+    dom="const elements={};global.document={getElementById:(id)=>elements[id]||(elements[id]={children:[],replaceChildren(){this.children=[]},appendChild(v){this.children.push(v)}}),createElement:()=>({})};"
+    state={'robot':{},'perception':{'worker':{}},'brain':{},'controller':{},'task':{},'chat':{'available':True,'messages':[{'role':'assistant','content':'已规划夹起红色方块，等待执行'}]},'workflow':{'state':'plan_preview','execution_available':False},'pending':False}
+    script=dom+code+'\nconst s='+json.dumps(state)+';render(s);const blocked={disabled:elements["task-send"].disabled,notice:elements["execution-readiness"].textContent,quote:elements["chat-history"].children[0].textContent};s.workflow.execution_available=true;s.workflow.execution_validation="experimental_simulation";render(s);console.log(JSON.stringify({blocked,enabled:!elements["task-send"].disabled,warning:elements["simulation-warning"].textContent}));'
+    value=json.loads(subprocess.check_output(['node','-e',script],text=True))
+    assert value['blocked']['disabled'] and '没有任务排队' in value['blocked']['notice']
+    assert value['blocked']['quote'].endswith('已规划夹起红色方块，等待执行')
+    assert '不代表系统执行状态' in value['blocked']['quote']
+    assert value['enabled'] and '实验性' in value['warning'] and '不能用于真实硬件' in value['warning']
+
+
+def test_camera_profile_discloses_actual_perception_vs_preview_resolution():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    packet={'status':'ready','perception_resolution':[1920,1440],'preview_resolution':[640,480],'illumination_profile':'shadow_free_rgb_v1','roi_tracking':True}
+    value=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify(formatCameraStatus('+json.dumps(packet)+')));'],text=True))
+    assert '识别 1920×1440 / 预览 640×480' in value
+    assert 'shadow_free_rgb_v1' in value and 'CPU' in value and 'ROI' in value
+
+
+def test_terminal_outcome_preserves_actual_failure_and_counts():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    outcome={'verified':False,'reason':'preclose_alignment_unverified','perception_detail':'occluded_left','driver':{'reason':'controller_rejected'},'calls':9,'actions':7,'decision_provenance':['fake_test']}
+    value=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify(formatExecutionOutcome('+json.dumps(outcome)+')));'],text=True))
+    assert 'preclose_alignment_unverified' in value and 'occluded_left' in value
+    assert 'Jev 9 次' in value and '已应用 7 步' in value and 'fake_test' in value
+    assert '未通过接受条件' in value
+    assert 'li.textContent=formatExecutionOutcome(flow.outcome)' in source
+
+
+def test_validated_goal_id_has_green_target_semantics():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    steps=[{'action':'place','object_id':'red','target_id':'goal'},{'action':'pick','object_id':'red','target_id':'goal'}]
+    values=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify('+json.dumps(steps)+'.map(formatPlanStep)));'],text=True))
+    assert all('绿色目标区域' in value for value in values)

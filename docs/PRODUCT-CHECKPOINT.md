@@ -2,7 +2,7 @@
 
 ## Acceptance status
 
-This is an incomplete SO-ARM101 product checkpoint. Production manipulation remains disabled. The requested live conversation → Qwen → Jev → image-verified pick/place acceptance has **not passed**.
+This is an incomplete SO-ARM101 product checkpoint. Ordinary preview disables manipulation. Explicit `--live` now enables **experimental simulator-only tasks**, while the requested live conversation → Qwen → Jev → image-verified pick/place acceptance has **not passed**. This is not a hardware-control capability or a reliability certification.
 
 Two independent blockers remain:
 
@@ -12,7 +12,7 @@ Two independent blockers remain:
 ## What changed and was checked
 
 - Conversation/task lifecycle is centralized in `embodied_arm/services/task_service.py`: history, observation, planning, execution feedback, cancellation, reset and duplicate-submission protection.
-- SO101 UI has text conversation and separate capability-gated execution. A missing Jev worker blocks execution before vision or brain requests; typing/chat remain independent of scene readiness.
+- The primary SO101 action is “提交并执行任务” / Enter: observe, plan and attempt execution. Optional conversation/plan preview is collapsed and never queues execution. Runtime state, not model wording such as “waiting to execute,” identifies whether a task was submitted. A missing Jev worker blocks execution before vision or brain requests; typing/chat remain independent of scene readiness.
 - `embodied_arm/runtime/start_so101.py` / `scripts/run-so101.sh` provide one startup entry point. README gives deployment and current limitations.
 - Tests live in `tests/`; standalone diagnostics live in `experiments/`; source packaging lives in `tools/`.
 - The physical grasp path was corrected using jaw geometry; closure is gradual. Idle stop preserves completed grip force. IK convergence was tightened to avoid accumulated off-axis drift.
@@ -23,7 +23,11 @@ Two independent blockers remain:
 
 Offline semantic and Jev fixtures are labelled as such. Physical tests use real simulated servos and contacts, without attaching or teleporting objects. Ground-truth capture-envelope evaluation is independent scoring, not a controller input. Successful low-level fixtures do not establish the full conversation task's success.
 
-The standard camera and motion defaults remain unchanged. Experimental shadow-free high-resolution rendering and alternative camera surveys are not promoted as a validated product profile. No motion button should be enabled merely because unit tests pass.
+The explicit experimental task factory accepts only the exact `SO101Simulation` class and uses the real provider IPC clients; it does not attach hardware or silently substitute fake inference. Its `validated` flag remains false. An experimental warning is nonblocking, while runtime checks still enforce freshness, visibility, confidence, workspace, budgets and cancellation.
+
+Experimental execution uses 1920×1440 perception, scaled ROI tracking and `shadow_free_rgb_v1` rendering with unchanged camera positions. The live UI preview is 640×480 to limit preview CPU cost; high-resolution perception still costs additional CPU/processing time. The UI exposes the active resolutions, lighting and ROI profile. Ordinary preview retains the previous low-resolution setup. This selected experimental profile is not a claim that occlusion or full-task acceptance is solved.
+
+The Jev session window is 120 calls/420 seconds; each task is bounded to 120 calls/300 seconds. Brain and vision windows remain 6 calls/600 seconds each. No automatic renewal or fallback occurs. Worker-only startup cannot enable an already-running preview app; the single-host `--live` entry starts the app in the intended experimental mode.
 
 ## Reproduce
 
@@ -37,9 +41,9 @@ The image/physics probe currently returns an unverified result. This failure is 
 
 ## Next concrete acceptance work
 
-Resolve provider access using supported environment permissions. For image execution, establish a calibrated camera arrangement or validated multi-view visibility strategy that keeps the manipulated object and nearby obstacle observable through approach, closure, carry and release. Preserve identity/uncertainty guards. Then run the complete single-block pick/place flow with offline fixtures, followed by live Qwen and Jev, before enabling production execution.
+Resolve provider access using supported environment permissions. For image execution, establish a calibrated camera arrangement or validated multi-view visibility strategy that keeps the manipulated object and nearby obstacle observable through approach, closure, carry and release. Preserve identity/uncertainty guards. Then run the complete single-block pick/place flow with offline fixtures, followed by live Qwen and Jev, before claiming production reliability. The experimental simulator entry can currently be tried but may stop on its runtime guards.
 
-## Final targeted regression results
+## Historical targeted regression results (before experimental unlock)
 
 - Service/UI/micro-motion/visual feedback/launcher/source-package selection: 81 passed
 - Marker memory: 30 passed
@@ -50,7 +54,7 @@ Resolve provider access using supported environment permissions. For image execu
 
 These selections overlap and must not be added into a single unique-test total. At the original development checkpoint, the entire suite had not yet been rerun after the final changes. Browser lifecycle checks used explicitly fake providers in a separate test app. No final live-model or full image/physics pick/place success is asserted.
 
-## Source publication regression — 2026-10-16
+## Historical source publication regression — 2026-10-16
 
 After source freeze and publication cleanup, the complete default offline suite
 passed: **800 tests and 121 subtests passed; 16 tests skipped**, in 245.76 seconds.
@@ -63,8 +67,12 @@ Generated simulation reports, recorded fixtures, credentials and runtime files
 are not committed. The source packaging helper now excludes recorded report
 fixtures as well. No live API calls were made by publication validation. The
 network and image-occlusion acceptance blockers above remain unresolved, and
-production manipulation stays disabled.
+manipulation remained disabled at that historical checkpoint. Current explicit simulator-only enablement is described above.
 
 ## Subsequent package refactor
 
 The structural refactor and deterministic diagnosis/fix of the IPC snapshot race are documented in [package verification](PACKAGE-REFACTOR.md). Its full offline regression passed; the live-model and image/physics acceptance limits above remain unchanged.
+
+## Dynamic-loop evidence boundary
+
+The cloud rendered-RGB → offline semantic fixture → FakeJev → PyBullet probe issued **11 controller calls and applied 10 physical actions**, then stopped on blue-obstacle occlusion. This remains a failed complete-task probe, not a live-model result or a prediction about a user's local machine. Current cloud provider access remains independently blocked; no live Qwen/Jev acceptance is asserted. See [dynamic-loop checkpoint](DYNAMIC-LOOP-CHECKPOINT.md) for the detailed scope.

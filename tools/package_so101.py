@@ -28,7 +28,7 @@ def package(destination):
     destination=Path(destination)
     roots=('tests','embodied_arm','experiments','tools','docs','scripts')
     files=[ROOT/name for name in ('README.md','requirements.txt','pyproject.toml','.gitignore') if (ROOT/name).is_file()]
-    example=ROOT/'config/provider.example.json'
+    example=ROOT/'config/provider-legacy.example.json'
     if example.is_symlink():
         raise ValueError('Unsafe configuration template path')
     if example.exists():
@@ -37,7 +37,7 @@ def package(destination):
             raise ValueError('Unexpected configuration template fields')
         if data.get('api_key') not in ('',None):raise ValueError('Example contains nonempty credential')
         files.append(example)
-    versioned=ROOT/'config/provider-v2.example.json'
+    versioned=ROOT/'config/provider.example.json'
     if versioned.is_symlink():raise ValueError('Unsafe configuration template path')
     if versioned.exists():
         data=json.loads(versioned.read_text())
