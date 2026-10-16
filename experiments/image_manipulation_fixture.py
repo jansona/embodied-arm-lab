@@ -18,7 +18,7 @@ def run():
     sim=SO101Simulation(seed=0,camera_size=(1920,1440),illumination_profile='shadow_free_rgb_v1')
     try:
         sim.evaluation_state=lambda:(_ for _ in ()).throw(AssertionError('Oracle forbidden'))
-        source=CameraSceneSource(sim,vision=RGBColourFixture(),refine_rgb=True,refinement_profile='scaled',roi_tracking=True)
+        source=CameraSceneSource(sim,vision=RGBColourFixture(),refine_rgb=True,refinement_profile='scaled')
         source.refresh();observer=PhaseSceneObserver(source)
         observer.validated=True # Offline acceptance injection, never a production default.
         controller=FakeJev();driver=JevMotionDriver(sim,controller,sleep=lambda _:sim.tick(24))

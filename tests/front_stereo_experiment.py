@@ -13,7 +13,6 @@ import numpy as np
 import embodied_arm.simulation.so101_simulation as simulation
 from embodied_arm.perception.camera_perception import CameraCalibration,RGBFrame,estimate_scene,PerceptionConfig,PixelDetection,LANDMARKS
 from embodied_arm.control.so101_control import CameraSceneSource,OBSERVATION_VOLUME
-from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
 from embodied_arm.perception.rgb_scaled_refinement import refine_packet
 from tests.rgb_coarse_fixture import RGBColourFixture
 from tests.test_so101_grasp_feasibility import _fixture_move,_settle
@@ -38,17 +37,14 @@ def run(left_eye=(.44,-.30,.39), profile='front_stereo_v1', required=('red','blu
         if 'goal' not in required:
             original_detections=tuple(original_detections)+tuple(PixelDetection('goal',f.camera_id,f.frame_id,None,0.,None,'unknown',LANDMARKS['goal']) for f in original_frames)
         images=[{'camera_id':f.camera_id,'width':1920,'height':1440} for f in original_frames]
-        bounds=bounds_from_detections(images,original_detections,required)
         original_uv={(d.object_id,d.camera_id):d.uv for d in original_detections}
         semantic_at=initial['scene']['captured_at']
         def observe(stage,seeds=original_detections):
-            current_bounds=bounds
             if stage=='lifted':
                 predicted=sim.proprioception()['ee']
                 hint_cal={cam:CameraCalibration.from_dict(simulation.camera_calibration(cam,1920,1440)) for cam in ('left','right')}
                 seeds=tuple(replace(d,uv=hint_cal[d.camera_id].project(predicted)) if d.object_id=='red' else d for d in seeds)
-                current_bounds=bounds_from_detections(images,seeds,required)
-            packet=sim.capture_frames(roi_bounds=current_bounds)
+            packet=sim.capture_frames()
             packet_rgb={k:packet[k] for k in ('frame_id','captured_at','images')}
             calibrated={c['camera_id']:CameraCalibration.from_dict(c) for c in packet['calibrations']}
             frames=tuple(RGBFrame.from_jpeg(packet['frame_id'],packet['captured_at'],calibrated[i['camera_id']],

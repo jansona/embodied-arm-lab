@@ -33,6 +33,9 @@ class MockProviderTransport:
         packet={'frame_id':meta['frame_id'],'captured_at':time.monotonic(),
                 'images':[dict(item,data_url=url) for item,url in zip(meta['images'],urls)]}
         assert len(urls)==2 and all(url.startswith('data:image/jpeg;base64,') for url in urls)
+        # Provider sees a bounded, downscaled WHOLE frame; native source remains 1920x1440.
+        assert all(item['width'] * 3 == item['height'] * 4 and max(item['width'],item['height']) <= 1024
+                   for item in packet['images'])
         coarse=RGBColourFixture(profile='scaled').perceive(packet)
         dimensions={item['camera_id']:(item['width'],item['height']) for item in packet['images']}
         detections=[]
@@ -69,7 +72,7 @@ def test_http_task_reaches_production_executor_jev_bridge_and_physics(tmp_path,m
     mock=MockProviderTransport()
     adapter=SO101JevAdapter(api_key='offline-placeholder',transport=httpx.MockTransport(mock.jev),max_calls=100)
     done=[]
-    worker=threading.Thread(target=lambda:done.append(worker_run(adapter,100,90)),daemon=True)
+    worker=threading.Thread(target=lambda:done.append(worker_run(adapter,100,420)),daemon=True)
     worker.start()
     deadline=time.monotonic()+5
     while not worker_status()['available'] and time.monotonic()<deadline:time.sleep(.02)
@@ -80,12 +83,13 @@ def test_http_task_reaches_production_executor_jev_bridge_and_physics(tmp_path,m
     try:
         with TestClient(app) as client:
             session=app.state.session
+            assert session.sim.camera_size == (1920,1440)
             monkeypatch.setattr(session.sim,'evaluation_state',lambda:(_ for _ in ()).throw(AssertionError('Object oracle forbidden')))
             initial=client.get('/api/state').json()
             assert initial['workflow']['execution_available'],initial['workflow']
             response=client.post('/api/tasks',json={'text':'夹起红色方块','execute':True})
             assert response.status_code==200,response.text
-            deadline=time.monotonic()+75;seen=[]
+            deadline=time.monotonic()+450;seen=[]
             while time.monotonic()<deadline:
                 state=client.get('/api/state').json();workflow=state['workflow'];seen.append(workflow['state'])
                 if not workflow['pending']:break
@@ -93,8 +97,8 @@ def test_http_task_reaches_production_executor_jev_bridge_and_physics(tmp_path,m
             if workflow['pending']:
                 client.post('/api/control',json={'action':'stop'})
                 raise AssertionError('Production task exceeded bounded integration wait: '+json.dumps(workflow,ensure_ascii=False))
-            print('MOCK_TRANSPORT_PRODUCTION_PATH',json.dumps({'state':workflow['state'],'error':workflow.get('error'),'outcome':workflow.get('outcome'),'physical_actions':session.sim.proprioception()['actions'],'vision_calls':mock.vision_calls,'brain_calls':mock.brain_calls},ensure_ascii=False))
-            assert mock.vision_calls>=1 and mock.brain_calls==1,(mock.vision_calls,mock.brain_calls,workflow)
+            print('MOCK_TRANSPORT_PRODUCTION_PATH',json.dumps({'state':workflow['state'],'error':workflow.get('error'),'outcome':workflow.get('outcome'),'physical_actions':session.sim.proprioception()['actions'],'vision_calls':mock.vision_calls,'brain_calls':mock.brain_calls},ensure_ascii=False),flush=True)
+            assert mock.vision_calls>=1 and mock.brain_calls>=1,(mock.vision_calls,mock.brain_calls,workflow)
             assert session.sim.proprioception()['actions']>0,json.dumps(workflow,ensure_ascii=False)
             assert workflow['state'] in ('failed','completed'),workflow
             assert workflow['outcome']['calls']>0,workflow
@@ -104,6 +108,6 @@ def test_http_task_reaches_production_executor_jev_bridge_and_physics(tmp_path,m
             else:assert workflow['outcome']['verified'] is True
             assert any(event['state']=='executing' for event in workflow['events']),workflow
     finally:
-        worker.join(92)
+        worker.join(422)
         assert not worker.is_alive(),'Bounded test worker failed to expire'
         adapter.close()

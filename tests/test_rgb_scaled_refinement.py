@@ -78,11 +78,11 @@ def test_occlusion_corner_loss_and_photometric_ambiguity_fail_at_every_resolutio
 
 
 @pytest.mark.parametrize('scale',[1,2,3])
-def test_same_colour_second_object_and_clipped_ai_roi_fail(scale):
+def test_same_colour_second_object_and_distant_ai_point_fail(scale):
     ambiguous=refine(scale,case='second_object',coarse=(334,223))
     assert not ambiguous.accepted
     assert ambiguous.reason in ('ambiguous_coloured_regions','roi_clipped')
-    clipped=refine(scale,coarse=(357,223))
+    clipped=refine(scale,coarse=(374,223))
     assert not clipped.accepted
     assert clipped.reason in ('roi_clipped','no_coloured_region_near_ai_point')
 
@@ -146,38 +146,12 @@ def test_baseline_module_and_default_source_are_unchanged():
     source=Path(baseline.__file__).read_text()
     assert 'rgb_scaled_refinement' not in source
 
-def test_bounded_crop_expansion_recovers_complete_rgb_without_relaxing_fit():
+def test_full_frame_fitting_has_no_crop_retry_and_preserves_identity_gate():
     kwargs=dict(object_id='red',uv_1000=[350/639*1000,223/479*1000],confidence=.98,width=640,height=480)
-    first=scaled.refine_rgb_landmark(image(),**kwargs)
-    assert first.reason=='roi_clipped'
-    result=scaled.refine_with_bounded_expansion(image(),**kwargs)
-    assert result.accepted and result.search_expanded
-    assert result.initial_roi_bounds==first.roi_bounds
-    assert result.roi_bounds[2]-result.roi_bounds[0]<=2*(first.roi_bounds[2]-first.roi_bounds[0])
-    assert result.pixel_sigma_px>=1 and result.face_support_ratio>=.90
+    result=scaled.refine_rgb_landmark(image(),**kwargs)
+    assert result.accepted and result.roi_bounds==(0,0,640,480)
     np.testing.assert_allclose(result.uv,centre(),atol=.9)
-    # A crop canvas does not contain the pixels needed by the larger search.
-    unavailable=scaled.refine_with_bounded_expansion(image(),capture_bounds=first.roi_bounds,**kwargs)
-    assert not unavailable.accepted and not unavailable.search_expanded
-
-
-def test_expansion_keeps_original_identity_nearness_and_rejection_gates():
-    kwargs=dict(object_id='red',uv_1000=[374/639*1000,223/479*1000],confidence=.98,width=640,height=480)
-    result=scaled.refine_rgb_landmark(image(),search_radius_px=90,**kwargs)
+    kwargs['uv_1000']=[374/639*1000,223/479*1000]
+    result=scaled.refine_rgb_landmark(image(),**kwargs)
     assert not result.accepted and result.reason=='no_coloured_region_near_ai_point'
-    with pytest.raises(ValueError,match='bounded expansion'):
-        scaled.refine_rgb_landmark(image(),search_radius_px=91,**kwargs)
-    for case in ('occlusion','missing_corner','split_face','ambiguous_brightness'):
-        kwargs['uv_1000']=[316/639*1000,223/479*1000]
-        result=scaled.refine_with_bounded_expansion(image(case=case),**kwargs)
-        assert not result.accepted and not result.search_expanded
-
-
-def test_expansion_retries_only_once_and_only_clipping(monkeypatch):
-    calls=[]
-    def clipped(jpeg,**kwargs):
-        calls.append(kwargs.get('search_radius_px'))
-        return scaled.ScaleAwareRefinement('red',False,'roi_clipped',(320.,240.),(275,195,366,286))
-    monkeypatch.setattr(scaled,'refine_rgb_landmark',clipped)
-    result=scaled.refine_with_bounded_expansion(b'fixture',object_id='red',uv_1000=[500,500],confidence=.9,width=640,height=480)
-    assert calls==[None,90] and not result.accepted and result.search_expanded
+    assert not hasattr(scaled,'refine_with_bounded_expansion')

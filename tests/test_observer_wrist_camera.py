@@ -82,7 +82,7 @@ def test_real_rgb_static_world_tracking_after_wrist_motion_without_oracle(monkey
             return checked
         monkeypatch.setattr(coarse,'prepare_coarse_packet',with_sensor_clock(coarse.prepare_coarse_packet))
         monkeypatch.setattr(coarse,'remap_result',with_sensor_clock(coarse.remap_result))
-        source=CameraSceneSource(sim,vision=RGBColourFixture(profile='scaled'),refine_rgb=True,refinement_profile='scaled',roi_tracking=True,clock=clock)
+        source=CameraSceneSource(sim,vision=RGBColourFixture(profile='scaled'),refine_rgb=True,refinement_profile='scaled',clock=clock)
         source.refresh();observer=PhaseSceneObserver(source,clock=clock)
         initial=observer.begin_step('pick','red')
         before={f.camera_id:f.calibration for f in observer.frames}

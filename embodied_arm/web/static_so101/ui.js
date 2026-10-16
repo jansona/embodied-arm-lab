@@ -95,8 +95,13 @@ return parts.join(' · ');
 function formatCameraProfile(camera){
 const resolution=value=>Array.isArray(value)&&value.length===2&&value.every(Number.isFinite)?value.join('×'):null;
 const perception=resolution(camera.perception_resolution),preview=resolution(camera.preview_resolution);
-if(!perception&&!preview)return '';
-return ` · 识别 ${perception||'未知'} / 预览 ${preview||'未知'}`+(camera.illumination_profile?' · 光照 '+camera.illumination_profile:'')+(camera.roi_tracking?' · ROI 本地跟踪':'')+(camera.perception_resolution?.[0]>=1920?' · 高分辨率识别增加 CPU 开销':'');
+const processing=camera.processing==='full_frame'?' · 整帧图像感知（不裁剪）':'';
+if(!perception&&!preview)return processing;
+return ` · 识别 ${perception||'未知'} / 预览 ${preview||'未知'}`+(camera.illumination_profile?' · 光照 '+camera.illumination_profile:'')+processing+(camera.perception_resolution?.[0]>=1920?' · 高分辨率识别增加 CPU 开销':'');
+}
+function formatObservationAgeLimit(camera,perception){
+const limit=perception?.max_observation_age_s;
+return camera?.processing==='full_frame'&&Number.isFinite(limit)&&limit>0?` · 停止状态下观察年龄上限 ${limit} 秒（仍需场景一致性检查）`:'';
 }
 function formatRoundtrip(label,seconds){
 return Number.isFinite(seconds)&&seconds>=0?` · 最近 ${label} 请求往返 ${seconds.toFixed(2)} 秒（含 IPC、网络及服务处理）`:'';
@@ -142,7 +147,7 @@ $('ee').textContent=Array.isArray(r.ee)?r.ee.map(x=>Number(x).toFixed(4)).join('
 $('joints').textContent=Array.isArray(r.joints)?r.joints.map(x=>Number(x).toFixed(3)).join(' / '):'不可用';
 $('gripper').textContent=r.gripper_openness==null?'不可用':Number(r.gripper_openness).toFixed(3);
 const labels={ready:'图像估计已通过检查',observing:'正在识别冻结的双相机图像…',vision_unconfigured:'视觉模块未配置',stale_or_invalidated:'识别结果已过期或失效；下次场景请求会自动更新，历史估计不能用于动作',vision_unavailable_or_uncertain:'视觉不可用或不确定，拒绝生成可执行坐标',cancelled:'观察已取消',occluded:'目标遮挡，拒绝规划',uncertain_detection:'检测不确定，拒绝规划',landmark_uncertain:'三角测量未通过不确定性检查',frame_mismatch:'检测与相机帧不匹配',scene_changed_during_vision:'识别期间场景改变，结果已丢弃'};
-$('capture-status').textContent=formatCameraStatus(s.camera);
+$('capture-status').textContent=formatCameraStatus(s.camera)+formatObservationAgeLimit(s.camera,p);
 $('vision-status').textContent=labels[p.status]||formatTaskError(p.status);
 const fixture=String(p.provenance||'').includes('fixture')||String(p.last_vision?.base_detector_provenance||'').includes('fixture');
 $('perception-method').textContent=p.rgb_refinement_enabled?(fixture?'离线测试粗定位 + RGB顶面几何细化':'Qwen粗定位 + RGB顶面几何细化'):'未启用 RGB 几何细化';

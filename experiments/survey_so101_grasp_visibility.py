@@ -29,7 +29,7 @@ def run(name, *, scoped=False):
         shift=math.sqrt(2)*.01+.006+.002-.012
         xyz=[v+shift*a for v,a in zip(xyz,pose[:3,0])]
         source=CameraSceneSource(sim,(ScopedRGBFixture if scoped else RGBColourFixture)(profile='scaled'),refine_rgb=True,
-                                 refinement_profile='scaled',roi_tracking=True)
+                                 refinement_profile='scaled')
         def observe(stage):
             sim.pause_idle();row={'object':name,'stage':stage,'perception_source':'offline_fixture_rgb_geometry'}
             try:

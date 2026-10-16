@@ -70,7 +70,6 @@ def validate_roi_and_occlusion(seed=0):
     from dataclasses import replace
     from io import BytesIO
     from PIL import Image, ImageDraw
-    from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
     from embodied_arm.perception.rgb_scaled_refinement import refine_packet
     sim = SO101Simulation(seed=seed, camera_size=(1920, 1440))
     original_call = sim.call
@@ -84,14 +83,13 @@ def validate_roi_and_occlusion(seed=0):
         source.refresh()
         snap, frames, detections = source.observation_evidence()
         images = [{'camera_id':f.camera_id,'width':f.calibration.width,'height':f.calibration.height,'data_url':f.data_url} for f in frames]
-        source.tracking_rois = bounds_from_detections(images, detections, ('red', 'blue', 'goal'))
         started = time.monotonic()
         fresh = source.track()
         elapsed = time.monotonic() - started
-        result = {'seed':seed, 'roi_tracking_accepted':True,'roi_tracking_elapsed_s':elapsed,
-                  'roi_age_at_use_s':time.monotonic()-fresh['scene']['captured_at'],
-                  'roi_bounds':source.tracking_rois}
-        packet = sim.capture_frames(roi_bounds=source.tracking_rois)
+        result = {'seed':seed, 'full_frame_tracking_accepted':True,'full_frame_tracking_elapsed_s':elapsed,
+                  'frame_age_at_use_s':time.monotonic()-fresh['scene']['captured_at'],
+                  'processing':'full_frame'}
+        packet = sim.capture_frames()
         packet = {k:packet[k] for k in ('frame_id','captured_at','images')}
         current = tuple(replace(d,frame_id=packet['frame_id']) for d in detections)
         red = next(d for d in current if d.object_id=='red' and d.camera_id=='left')

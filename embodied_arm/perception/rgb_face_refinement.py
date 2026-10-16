@@ -1,7 +1,7 @@
 """Experimental hybrid Qwen-region + RGB face geometry, entirely offline.
 
 The AI supplies object identity and a coarse normalized pixel point. Only JPEG
-pixels inside its bounded ROI are inspected. No camera extrinsics, simulator,
+pixels across the full image are inspected. No camera extrinsics, simulator,
 depth, supplied masks, body IDs, object sizes, or world coordinates are inputs.
 
 This deliberately narrow experiment requires a uniformly coloured cuboid with a
@@ -187,8 +187,7 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
                         confidence: float, width: int, height: int) -> FaceRefinement:
     """Refine a Qwen coarse point to an observed face centre, in native pixels.
 
-    The ROI is fixed by image dimensions and the AI point (7% of image width for
-    cubes, 10% for the marker). Never search outside it or use a world reference.
+    The complete image is inspected; the AI point selects semantic identity.
     Returned corners are cyclic; centre is diagonal intersection, not the image
     centroid, because the physical square centre projects projectively.
     """
@@ -205,8 +204,7 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
         raise ValueError('Expected bounded JPEG bytes')
     coarse = (float(uv_1000[0]*(width-1)/1000), float(uv_1000[1]*(height-1)/1000))
     radius = max(24, math.ceil(width*(.10 if object_id == 'goal' else .07)))
-    roi = (max(0, math.floor(coarse[0]-radius)), max(0, math.floor(coarse[1]-radius)),
-           min(width, math.ceil(coarse[0]+radius+1)), min(height, math.ceil(coarse[1]+radius+1)))
+    roi = (0, 0, width, height)
     def reject(reason):
         return FaceRefinement(object_id, False, reason, coarse, roi)
     if confidence < .75:
@@ -215,7 +213,7 @@ def refine_rgb_landmark(jpeg: bytes, *, object_id: str, uv_1000: Sequence[float]
         with Image.open(BytesIO(jpeg)) as image:
             if image.format != 'JPEG' or image.mode != 'RGB' or image.size != (width, height):
                 raise ValueError('Expected RGB JPEG matching dimensions')
-            rgb = np.asarray(image.crop(roi), dtype=float)
+            rgb = np.asarray(image, dtype=float)
     except (OSError, Image.DecompressionBombError) as exc:
         raise ValueError('Invalid JPEG') from exc
     r, g, b = np.moveaxis(rgb, 2, 0)

@@ -17,7 +17,6 @@ from embodied_arm.simulation.so101_simulation import SO101Simulation
 from embodied_arm.control.so101_control import CameraSceneSource,OBSERVATION_VOLUME
 from embodied_arm.perception.camera_perception import CameraCalibration,PixelDetection,LANDMARKS,RGBFrame,estimate_scene,PerceptionConfig
 from embodied_arm.perception.rgb_scaled_refinement import refine_rgb_landmark
-from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
 from tests.rgb_coarse_fixture import RGBColourFixture
 from tests.test_so101_grasp_feasibility import _fixture_move,_settle
 
@@ -95,7 +94,6 @@ def run(inspect_chain=False, inspect_unverified_closure=False):
         selected=tuple(d for d in detections if d.object_id in ('red','blue'))
         anchors={(d.object_id,d.camera_id):d.uv for d in selected}
         images=[{'camera_id':f.camera_id,'width':f.calibration.width,'height':f.calibration.height} for f in frames]
-        bounds=bounds_from_detections(images,selected,('red','blue'))
         point=initial['scene']['objects']['red']['xyz']
         geometry=sim.grasp_geometry([point[0],point[1],point[2]-.007])
         offset=geometry['approach_offset_world']
@@ -107,8 +105,7 @@ def run(inspect_chain=False, inspect_unverified_closure=False):
         start_tcp=sim.proprioception()['ee']
         report.update(prior_hover_tcp=safe_tcp,blocked_tcp=start_tcp,intended_grasp_tcp=target)
         def capture(stage, seeds=selected):
-            current_bounds=bounds_from_detections(images,seeds,('red','blue'))
-            packet=sim.capture_frames(roi_bounds=current_bounds)
+            packet=sim.capture_frames()
             calibrations={c['camera_id']:CameraCalibration.from_dict(c) for c in packet['calibrations']}
             current={};views=[]
             for seed in seeds:

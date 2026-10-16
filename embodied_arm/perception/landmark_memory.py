@@ -8,13 +8,15 @@ import math
 from embodied_arm.perception.camera_perception import EstimatedScene
 
 class FixedGoalMemory:
-    def __init__(self,max_age_s=120.,*,moving_wrist=False):
+    def __init__(self,max_age_s=120.,*,moving_wrist=False,max_observation_age_s=3.):
         if not 0<max_age_s<=120:raise ValueError('Invalid marker-memory lease')
+        if type(max_observation_age_s) not in (int,float) or not math.isfinite(max_observation_age_s) or not 1<=max_observation_age_s<=60:raise ValueError('Invalid observation age budget')
+        self.max_observation_age_s=max_observation_age_s
         self.moving_wrist=bool(moving_wrist)
         self.max_age_s=max_age_s;self.record=None
     def remember(self,snapshot,frames,*,now):
         if snapshot.get('source')!='rgb_only':raise ValueError('RGB source required')
-        scene=EstimatedScene.from_dict(snapshot['scene']);goal=scene.require('goal',now=now,max_age_s=3)
+        scene=EstimatedScene.from_dict(snapshot['scene']);goal=scene.require('goal',now=now,max_age_s=self.max_observation_age_s)
         if (len(frames)!=2 or {f.camera_id:f.frame_id for f in frames}!=dict(scene.frame_ids)
                 or any(abs(f.captured_at-scene.captured_at)>.05 for f in frames)):
             raise ValueError('Marker frame association mismatch')
@@ -35,7 +37,7 @@ class FixedGoalMemory:
         return deepcopy(r)
     def check_visible(self,scene,*,now):
         if self.record is None:return
-        point=scene.require('goal',now=now,max_age_s=3)
+        point=scene.require('goal',now=now,max_age_s=self.max_observation_age_s)
         if math.dist(point.xyz,self.record['estimate']['xyz'])>.003:
             self.record=None;raise ValueError('Previously fixed marker moved')
     def clear(self):self.record=None

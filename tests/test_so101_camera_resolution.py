@@ -20,17 +20,11 @@ def test_explicit_native_resolution_matches_rgb_and_calibration(size):
 def test_unbounded_resolution_rejected():
     with pytest.raises(ValueError):SO101Simulation(camera_size=(9999,9999))
 
-def test_roi_capture_is_explicit_and_preserves_native_coordinates():
-    sim=SO101Simulation(camera_size=(1920,1440))
+def test_full_frame_capture_has_no_crop_option_or_black_canvas():
+    sim=SO101Simulation(camera_size=(640,480))
     try:
-        bounds={'left':[824,528,1184,992],'right':[752,544,1088,1072]}
-        packet=sim.capture_frames(roi_bounds=bounds)
-        assert packet['capture_profile']=='native_coordinate_roi_canvas'
-        assert packet['observed_roi_bounds']==bounds
-        for image,cal in zip(packet['images'],packet['calibrations']):
-            assert image['width']==1920 and cal['cx']==959.5
-            rgb=Image.open(BytesIO(base64.b64decode(image['data_url'].split(',')[1])))
-            assert rgb.getpixel((0,0))==(0,0,0)
-        assert not sim._renders # Cropped observations never replace full preview cache.
-        with pytest.raises(ValueError):sim.capture_frames(roi_bounds={'left':bounds['left']})
+        packet=sim.capture_frames()
+        assert 'observed_roi_bounds' not in packet and 'capture_profile' not in packet
+        assert set(sim._renders)=={'left','right'}
+        with pytest.raises(TypeError):sim.capture_frames(roi_bounds={})
     finally:sim.close()

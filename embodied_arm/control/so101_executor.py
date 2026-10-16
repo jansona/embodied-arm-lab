@@ -37,11 +37,11 @@ class VisualWaypointExecutor:
                 self._check(generation,deadline)
                 from embodied_arm.perception.camera_perception import EstimatedScene
                 scene=EstimatedScene.from_dict(snapshot['scene'])
-                point=scene.require(object_id,now=self.clock(),max_age_s=30)
+                point=scene.require(object_id,now=self.clock(),max_age_s=getattr(self.source,"max_observation_age_s",3.))
                 if point.position_std_m>MAX_POSITION_STD_M:raise ValueError('uncertain_landmark')
                 robot=robot_only(snapshot['robot']);target=[a+b for a,b in zip(point.xyz,offset_xyz)]
                 if any(not lo<=x<=hi for x,(lo,hi) in zip(target,robot['workspace'])):raise ValueError('target_outside_workspace')
-                obstacle=scene.require('blue' if object_id=='red' else 'red',now=self.clock(),max_age_s=3)
+                obstacle=scene.require('blue' if object_id=='red' else 'red',now=self.clock(),max_age_s=getattr(self.source,"max_observation_age_s",3.))
                 obstacle_center=[*obstacle.xyz[:2],obstacle.xyz[2]-.01]
                 self._clearance(robot['ee'],target,obstacle_center)
                 from embodied_arm.perception.so101_uncertainty import axis_bands

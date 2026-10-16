@@ -5,8 +5,9 @@ that, fresh captures and explicit static/carried phases own object association.
 No camera depth, segmentation IDs, contact data or simulator object poses enter.
 """
 import base64
-from dataclasses import asdict, replace
+from dataclasses import asdict
 import time
+import math
 import uuid
 from embodied_arm.perception.camera_perception import CameraCalibration, RGBFrame, EstimatedScene, estimate_scene, PerceptionConfig, PixelDetection
 from embodied_arm.perception.rgb_region_tracker import RGBRegionTracker
@@ -16,8 +17,11 @@ from embodied_arm.perception.visual_feedback import DynamicRGBPhaseTracker, Visu
 class PhaseSceneObserver:
     validated = False
 
-    def __init__(self, source, *, clock=time.monotonic):
+    def __init__(self, source, *, clock=time.monotonic, semantic_lease_s=120.):
+        if type(semantic_lease_s) not in (int,float) or not math.isfinite(semantic_lease_s) or not 1<=semantic_lease_s<=420:
+            raise ValueError("Invalid bounded semantic lease")
         self.moving_wrist=getattr(source.sim,"camera_profile","legacy_fixed_stereo")=="observer_wrist"
+        self.max_observation_age_s=getattr(source,"max_observation_age_s",3.)
         self.source = source
         self.sim = source.sim
         self.clock = clock
@@ -29,10 +33,9 @@ class PhaseSceneObserver:
         self.object_id = None
         self.phase = 'inactive'
         self.frames = None
-        self.frame_roi_bounds=None
         self.detections = None
         self.semantic_at = None
-        self.frame_count=0;self.max_frames=120;self.lease_seconds=120.
+        self.frame_count=0;self.max_frames=120;self.lease_seconds=float(semantic_lease_s)
         self.closure_action=None
         self.required_objects=("red","blue")
         self.goal_memory=None;self.goal_tracker=None;self.goal_detections=();self.task_action="pick"
@@ -68,7 +71,7 @@ class PhaseSceneObserver:
         # Mandatory newly captured RGB before transferring identity between steps.
         self.observe()
         scene=EstimatedScene.from_dict(self.latest['scene'])
-        for name in self.required_objects:scene.require(name,now=self.clock())
+        for name in self.required_objects:scene.require(name,now=self.clock(),max_age_s=self.max_observation_age_s)
         self.configure_task(action)
         if self.object_id!=object_id:
             self.object_id=object_id;self.identity_token=uuid.uuid4().hex
@@ -142,22 +145,21 @@ class PhaseSceneObserver:
             self.identity_token = uuid.uuid4().hex
             self.semantic_at = self.source.semantic_deadline - 60.0 if self.source.semantic_deadline is not None else frames[0].captured_at
             self.frames = frames
-            self.frame_roi_bounds=getattr(self.source,"last_capture_roi_bounds",None)
             self.detections = detections
             self.latest = self._evidence(snapshot, detections, 'dynamic_rgb_track')
             # Record fresh goal evidence before expensive image tracker setup.
             if EstimatedScene.from_dict(snapshot['scene']).objects['goal'].valid:
                 from embodied_arm.perception.landmark_memory import FixedGoalMemory
-                self.goal_memory=FixedGoalMemory(self.lease_seconds,moving_wrist=self.moving_wrist)
+                self.goal_memory=FixedGoalMemory(min(self.lease_seconds,120.),moving_wrist=self.moving_wrist,max_observation_age_s=self.max_observation_age_s)
                 self.goal_memory.remember(snapshot,frames,now=self.clock())
                 self.goal_detections=tuple(d for d in detections if d.object_id=='goal')
-                self.goal_tracker=RGBRegionTracker(clock=self.clock,refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames,moving_wrist=self.moving_wrist)
-                self.goal_tracker.start(self._packet(frames),detections,snapshot['robot']['epoch'],now=self.clock(),required_objects=('goal',),**self._calibration_args(frames,capture_roi_bounds=self.frame_roi_bounds))
+                self.goal_tracker=RGBRegionTracker(max_observation_age_s=self.max_observation_age_s,clock=self.clock,refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames,moving_wrist=self.moving_wrist)
+                self.goal_tracker.start(self._packet(frames),detections,snapshot['robot']['epoch'],now=self.clock(),required_objects=('goal',),**self._calibration_args(frames))
             self._start_static(self.required_objects)
         self.phase = phase
         if (phase in ('closing','lift') or self.task_action=='place' and phase=='approach') and self.dynamic is None:
             from embodied_arm.perception.visual_feedback import _from_snapshot
-            self.dynamic = DynamicRGBPhaseTracker(profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,moving_wrist=self.moving_wrist)
+            self.dynamic = DynamicRGBPhaseTracker(max_observation_age_s=self.max_observation_age_s,profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,moving_wrist=self.moving_wrist)
             self.dynamic.start(_from_snapshot(self.latest), self.frames, object_id=object_id, now=self.clock())
             point=EstimatedScene.from_dict(self.latest['scene']).objects[object_id]
             self.dynamic_seed=(point.xyz,tuple(self.latest['robot']['ee']))
@@ -170,17 +172,17 @@ class PhaseSceneObserver:
         self.last_failure_details=None
         return result
 
-    def _calibration_args(self,frames,*,capture_roi_bounds=None):
-        return {'calibrations':[f.calibration.to_dict() for f in frames],'capture_roi_bounds':capture_roi_bounds} if self.moving_wrist else {}
+    def _calibration_args(self,frames):
+        return {'calibrations':[f.calibration.to_dict() for f in frames]} if self.moving_wrist else {}
 
     def _start_static(self, required):
-        self.static = RGBRegionTracker(clock=self.clock, refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames,moving_wrist=self.moving_wrist)
+        self.static = RGBRegionTracker(max_observation_age_s=self.max_observation_age_s,clock=self.clock, refinement_profile=self.source.refinement_profile,semantic_lifetime_s=self.lease_seconds,max_tracking_frames=self.max_frames,moving_wrist=self.moving_wrist)
         # Refiners require six slots; unobserved optional landmarks stay unknown.
         known={(d.camera_id,d.object_id):d for d in self.detections}
         seeds=tuple(known.get((cid,obj),PixelDetection(obj,cid,self.frames[0].frame_id,None,0.,None,
             'unknown','goal_center' if obj=='goal' else 'top_face_center'))
             for obj in ('red','blue','goal') for cid in ('left','right'))
-        result = self.static.start(self._packet(self.frames), seeds, self.latest['robot']['epoch'], now=self.clock(), required_objects=required,**self._calibration_args(self.frames,capture_roi_bounds=self.frame_roi_bounds))
+        result = self.static.start(self._packet(self.frames), seeds, self.latest['robot']['epoch'], now=self.clock(), required_objects=required,**self._calibration_args(self.frames))
         if not result.accepted:
             raise ValueError('static_association_rejected')
 
@@ -204,32 +206,7 @@ class PhaseSceneObserver:
         if self.frame_count>=self.max_frames:raise ValueError('Phase frame budget exhausted')
         if before['busy'] or not before['paused']:
             raise ValueError('Observation requires paused robot')
-        bounds=None
-        if self.source.roi_tracking:
-            from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
-            if self.moving_wrist:
-                current=self.sim.camera_calibrations()
-                calibrations={c['camera_id']:CameraCalibration.from_dict(c) for c in current}
-                seeds=list(self.static.projected_seeds(current))
-            else:
-                current=self._packet(self.frames)['images']
-                calibrations={f.camera_id:f.calibration for f in self.frames}
-                seeds=list(self.detections)
-            if self.dynamic:
-                xyz,tcp=self.dynamic_seed
-                predicted=[p+now-old for p,now,old in zip(xyz,before['ee'],tcp)]
-                seeds=[d for d in seeds if d.object_id!=self.object_id]+[
-                    replace(d,uv=calibrations[d.camera_id].project(predicted))
-                    for d in self.detections if d.object_id==self.object_id]
-            scope=self.required_objects
-            if self.task_action=='place' and self.goal_detections:
-                try:
-                    goals=self.goal_tracker.projected_seeds(current) if self.moving_wrist else self.goal_detections
-                    seeds=[d for d in seeds if d.object_id!='goal']+list(goals)
-                    scope=(*scope,'goal')
-                except ValueError:pass  # Optional fixed-goal memory remains historical.
-            bounds=bounds_from_detections(current,seeds,scope,**({'radius_scale':2,'expanded_camera_ids':('right',)} if self.moving_wrist else {}))
-        packet = self.sim.capture_frames(roi_bounds=bounds) if bounds else self.sim.capture_frames()
+        packet = self.sim.capture_frames()
         if self.moving_wrist:
             from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
             validate_capture_geometry(packet)
@@ -240,7 +217,7 @@ class PhaseSceneObserver:
         previous_calibrations={f.camera_id:f.calibration for f in self.frames}
         from embodied_arm.perception.moving_camera_geometry import compatible_calibrations
         if not compatible_calibrations(previous_calibrations,calibrations,moving_wrist=self.moving_wrist):raise ValueError('Camera calibration changed')
-        tracked = self.static.track(self._packet(frames), before['epoch'], now=self.clock(),**self._calibration_args(frames,capture_roi_bounds=packet.get("observed_roi_bounds")))
+        tracked = self.static.track(self._packet(frames), before['epoch'], now=self.clock(),**self._calibration_args(frames))
         if not tracked.accepted:
             if self.last_failure_details is None:
                 self.last_failure_details={'reason':tracked.reason,'fits':self.static.last_failure_details}
@@ -258,28 +235,27 @@ class PhaseSceneObserver:
                 raise ValueError('Dynamic RGB association lost; semantic refresh required')
             detections += list(moved.detections)
         if self.task_action=='place' and self.goal_tracker and self.goal_tracker.status()['active']:
-            goal_result=self.goal_tracker.track(self._packet(frames),before['epoch'],now=self.clock(),**self._calibration_args(frames,capture_roi_bounds=packet.get("observed_roi_bounds")))
+            goal_result=self.goal_tracker.track(self._packet(frames),before['epoch'],now=self.clock(),**self._calibration_args(frames))
             if goal_result.accepted:
-                goal_scene=estimate_scene(frames,goal_result.detections,now=self.clock(),workspace=OBSERVATION_VOLUME,config=PerceptionConfig(max_frame_age_s=3,max_position_std_m=.003,max_ray_separation_m=.006))
+                goal_scene=estimate_scene(frames,goal_result.detections,now=self.clock(),workspace=OBSERVATION_VOLUME,config=PerceptionConfig(max_frame_age_s=self.max_observation_age_s,max_position_std_m=.003,max_ray_separation_m=.006))
                 self.goal_memory.check_visible(goal_scene,now=self.clock())
             elif goal_result.reason=='initial_anchor_drift':
                 self.goal_memory.clear();raise ValueError('Fixed marker moved')
         after = robot_only(self.sim.proprioception())
         if after != before:
             raise ValueError('Robot changed during capture')
-        scene = estimate_scene(frames, detections, now=self.clock(), workspace=OBSERVATION_VOLUME, config=PerceptionConfig(max_frame_age_s=3, max_position_std_m=0.003, max_ray_separation_m=0.006))
+        scene = estimate_scene(frames, detections, now=self.clock(), workspace=OBSERVATION_VOLUME, config=PerceptionConfig(max_frame_age_s=self.max_observation_age_s, max_position_std_m=0.003, max_ray_separation_m=0.006))
         rejected=[{'object_id':obj,'reason':scene.objects[obj].reason}
                   for obj in self.required_objects if not scene.objects[obj].valid]
         if rejected and self.last_failure_details is None:
             self.last_failure_details={'reason':'triangulation_rejected','landmarks':rejected,
                                        'fits':self.static.last_fit_details}
         for obj in self.required_objects:
-            scene.require(obj, now=self.clock(), max_age_s=3)
+            scene.require(obj, now=self.clock(), max_age_s=self.max_observation_age_s)
         snapshot = {'schema': 'so101-camera-observation-v1', 'source': 'rgb_only', 'required_objects': list(self.required_objects), 'robot': after, 'scene': scene.to_dict(), 'detector_provenance': 'phase_scoped_rgb_geometry'}
         self.frame_count+=1
         self.latest = self._evidence(snapshot, detections, 'dynamic_rgb_track')
         self.frames = frames
-        self.frame_roi_bounds=packet.get("observed_roi_bounds")
         self.detections = tuple(detections)
         return self.latest
 
@@ -291,11 +267,11 @@ class PhaseSceneObserver:
         if robot['epoch']!=prior['epoch'] or robot['actions']!=prior['actions'] or robot['busy'] or not robot['paused']:raise ValueError('Observation invalidated by robot motion')
         scene = EstimatedScene.from_dict(self.latest['scene'])
         for obj in self.required_objects:
-            scene.require(obj, now=self.clock(), max_age_s=3)
+            scene.require(obj, now=self.clock(), max_age_s=self.max_observation_age_s)
         return self.latest
 
     def verify_lift(self, before, after, obj):
-        return asdict(verify_lift(before, after, obj, now=self.clock(),config=VerificationConfig(max_semantic_age_s=self.lease_seconds,max_phase_s=self.lease_seconds)))
+        return asdict(verify_lift(before, after, obj, now=self.clock(),config=VerificationConfig(max_age_s=self.max_observation_age_s,max_semantic_age_s=self.lease_seconds,max_phase_s=self.lease_seconds)))
 
     def fixed_goal(self):
         if self.goal_memory is None:raise ValueError('No observed fixed goal')
@@ -305,7 +281,7 @@ class PhaseSceneObserver:
         target = [support_xyz[0], support_xyz[1], support_xyz[2] + 0.02]
         from embodied_arm.perception.camera_perception import ObjectEstimate
         goal=ObjectEstimate.from_dict(self.fixed_goal()['estimate'])
-        return asdict(verify_release(held, released, retreated, obj, target, target_std_m=goal.position_std_m, now=self.clock(),config=VerificationConfig(max_semantic_age_s=self.lease_seconds,max_phase_s=self.lease_seconds)))
+        return asdict(verify_release(held, released, retreated, obj, target, target_std_m=goal.position_std_m, now=self.clock(),config=VerificationConfig(max_age_s=self.max_observation_age_s,max_semantic_age_s=self.lease_seconds,max_phase_s=self.lease_seconds)))
 
     def cancel(self):
         self._prepared_hold_identity=None

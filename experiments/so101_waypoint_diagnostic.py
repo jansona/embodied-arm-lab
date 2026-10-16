@@ -24,7 +24,7 @@ def run(recorded_detections,object_id='red',high_resolution=False):
             i=obs['axis_index'];error=obs['target']['target_xyz'][i]-obs['robot']['ee'][i];tol=obs['target']['tolerance_m']
             choice='positive' if error>tol else 'negative' if error < -tol else 'hold'
             return parse_response({'model':ALIYUN_MODEL,'answers':{'action':{'type':'choice','choice':choice,'confidence':1.,'probabilities':{k:float(k==choice) for k in ('positive','negative','hold')}}}},obs)
-    sim=SO101Simulation(camera_size=(1920,1440) if high_resolution else (640,480));source=CameraSceneSource(sim,VisionFixture(),refine_rgb=True,refinement_profile='scaled' if high_resolution else 'baseline',roi_tracking=high_resolution)
+    sim=SO101Simulation(camera_size=(1920,1440) if high_resolution else (640,480));source=CameraSceneSource(sim,VisionFixture(),refine_rgb=True,refinement_profile='scaled' if high_resolution else 'baseline')
     stop=threading.Event()
     def physics():
         while not stop.is_set():sim.tick(4);time.sleep(1/60)

@@ -355,3 +355,33 @@ def test_red_hover_scope_requires_fresh_blue_obstacle_too(fake_refiner,monkeypat
         return replace(result,accepted=False,detections=output)
     monkeypatch.setattr(tracker_module,'refine_packet',fail_blue)
     assert_cleared(tracker,tracker.track(packet('fresh',101.),7,now=101.),'tracking_refinement_failed')
+
+
+def test_explicit_full_frame_processing_age_preserves_capture_timestamp(fake_refiner):
+    tracker=RGBRegionTracker(max_observation_age_s=30.)
+    assert tracker.start(packet(),detections(),7,now=100.).accepted
+    current=packet('current',101.)
+    result=tracker.track(current,7,now=113.)
+    assert result.accepted
+    assert current['captured_at']==101.
+    expired=tracker.track(packet('expired',114.),7,now=144.1)
+    assert not expired.accepted and expired.reason=='stale_current_frame'
+
+
+@pytest.mark.parametrize('age',[0,61,float('nan'),float('inf'),True,None,'30'])
+def test_invalid_full_frame_processing_age_rejected(age):
+    with pytest.raises(ValueError,match='age budget'):RGBRegionTracker(max_observation_age_s=age)
+
+
+def test_task_bounded_identity_lease_does_not_renew_or_allow_stale_rgb(fake_refiner):
+    tracker=RGBRegionTracker(semantic_lifetime_s=420.)
+    assert tracker.start(packet(),detections(),7,now=100.).accepted
+    assert tracker.track(packet('late-fresh',500.),7,now=500.1).accepted
+    result=tracker.track(packet('after-lease',521.),7,now=521.1)
+    assert not result.accepted and result.reason=='semantic_expired'
+    assert tracker.start(packet(),detections(),7,now=100.).accepted
+    stale=tracker.track(packet('late-stale',490.),7,now=500.)
+    assert not stale.accepted and stale.reason=='stale_current_frame'
+    assert tracker.start(packet(),detections(),7,now=100.).accepted
+    tracker.clear()
+    assert not tracker.track(packet('after-stop',101.),7,now=101.).accepted

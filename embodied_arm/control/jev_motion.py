@@ -15,7 +15,9 @@ from embodied_arm.perception.so101_uncertainty import axis_bands
 class JevMotionDriver:
     # Contract and real-servo fixture tests validate this driver, not live model capability.
     validated = True
-    def __init__(self, sim, controller, *, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, sim, controller, *, clock=time.monotonic, sleep=time.sleep, max_observation_age_s=3.):
+        if type(max_observation_age_s) not in (int,float) or not math.isfinite(max_observation_age_s) or not 1<=max_observation_age_s<=60:raise ValueError('invalid_observation_age')
+        self.max_observation_age_s=float(max_observation_age_s)
         self.sim, self.controller = sim, controller
         self.clock, self.sleep = clock, sleep
         self._lock = threading.Lock()
@@ -134,7 +136,7 @@ class JevMotionDriver:
                 scene=observation_snapshot.get('scene',{}) if isinstance(observation_snapshot,dict) else {}
                 captured_at=scene.get('captured_at')
                 age=self.clock()-captured_at if type(captured_at) in (int,float) else None
-                if age is not None and (not math.isfinite(age) or not 0<=age<=3):raise ValueError('perception_rejected')
+                if age is not None and (not math.isfinite(age) or not 0<=age<=self.max_observation_age_s):raise ValueError('perception_rejected')
                 if callback:
                     callback({'phase':'observation','iteration':iteration,'kind':kind,
                               'frame_ids':scene.get('frame_ids'),'observation_age_seconds':age,
@@ -182,7 +184,7 @@ class JevMotionDriver:
                 self._unchanged(robot)
                 if not decision.accepted:
                     raise ValueError('controller_rejected')
-                if captured_at is not None and (not math.isfinite(captured_at) or not 0<=self.clock()-captured_at<=3):
+                if captured_at is not None and (not math.isfinite(captured_at) or not 0<=self.clock()-captured_at<=self.max_observation_age_s):
                     if callback:callback({'phase':'decision_stale','iteration':iteration,'reason':'visual_observation_expired','calls':result['calls']})
                     continue
                 if decision.action == 'hold':

@@ -7,7 +7,6 @@ import time
 from embodied_arm.perception.camera_perception import CameraCalibration,RGBFrame,estimate_scene,PerceptionConfig
 from embodied_arm.simulation.so101_simulation import SO101Simulation
 from embodied_arm.control.so101_control import CameraSceneSource,OBSERVATION_VOLUME
-from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
 from embodied_arm.perception.rgb_scaled_refinement import refine_packet
 from tests.rgb_coarse_fixture import RGBColourFixture
 from tests.test_so101_grasp_feasibility import _fixture_move,_settle
@@ -21,9 +20,8 @@ def run():
         initial=source.refresh();_,original_frames,original_detections=source.observation_evidence()
         semantic_at=initial['scene']['captured_at']
         images=[{'camera_id':f.camera_id,'width':1920,'height':1440} for f in original_frames]
-        bounds=bounds_from_detections(images,original_detections,('red','blue','goal'))
         def capture():
-            packet=sim.capture_frames(roi_bounds=bounds)
+            packet=sim.capture_frames()
             calibrations={c['camera_id']:CameraCalibration.from_dict(c) for c in packet['calibrations']}
             frames=tuple(RGBFrame.from_jpeg(packet['frame_id'],packet['captured_at'],calibrations[i['camera_id']],
                 base64.b64decode(i['data_url'].split(',')[1])) for i in packet['images'])

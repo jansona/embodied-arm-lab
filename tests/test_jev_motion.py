@@ -237,3 +237,28 @@ def test_applied_command_event_survives_failed_visual_feedback():
     assert len(applied)==1 and applied[0]['applied'] is True
     assert applied[0]['visually_verified'] is False
     assert not any(e['phase']=='motion_completed' for e in events)
+
+@pytest.mark.parametrize('age,expected',[(12.,'completed'),(31.,'stopped')])
+def test_explicit_full_frame_age_budget_keeps_original_capture_time(age,expected):
+    sim,jev,motion=driver(clock=lambda:40.,max_observation_age_s=30.)
+    capture_time=40.-age
+    snapshot={'scene':{'captured_at':capture_time,'frame_ids':{'left':'full','right':'full'}}}
+    result=motion.move_to([.2,0,.06],ZERO,before_decision=lambda:snapshot)
+    assert result['status']==expected
+    assert snapshot['scene']['captured_at']==capture_time
+    assert not jev.requests and not sim.commands
+
+@pytest.mark.parametrize('age',[0,61,float('nan'),True])
+def test_invalid_observation_age_budget_rejected(age):
+    with pytest.raises(ValueError,match='invalid_observation_age'):
+        driver(max_observation_age_s=age)
+
+def test_full_frame_age_expiring_during_model_reply_blocks_actuation():
+    clock=[20.]
+    jev=FakeJev(on_call=lambda:clock.__setitem__(0,31.))
+    sim,_,motion=driver(controller=jev,clock=lambda:clock[0],max_observation_age_s=30.)
+    snapshot={'scene':{'captured_at':0.,'frame_ids':{'left':'full','right':'full'}}}
+    result=motion.move_to([.208,0,.06],ZERO,before_decision=lambda:snapshot,deadline=60)
+    assert len(jev.requests)==1 and result['status']=='stopped'
+    assert not sim.commands and result['actions']==0
+    assert snapshot['scene']['captured_at']==0.

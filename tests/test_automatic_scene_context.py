@@ -73,3 +73,14 @@ def test_stop_during_capture_prevents_vision_submission():
  s.sim.capture_frames=capture
  with pytest.raises(ValueError):s.ensure_brain_scene()
  assert captures==[True] and calls==[]
+
+
+def test_full_frame_source_declares_bounded_processing_age_without_roi_switch():
+    import inspect
+    s=CameraSceneSource(SimpleNamespace(),max_observation_age_s=30.)
+    assert s.status()['max_observation_age_s']==30.
+    assert 'roi_tracking' not in inspect.signature(CameraSceneSource).parameters
+    assert 'observed_roi_bounds' not in s.status()
+    for age in (0,61,float('nan'),True,None,'30'):
+        with pytest.raises(ValueError,match='age budget'):
+            CameraSceneSource(SimpleNamespace(),max_observation_age_s=age)

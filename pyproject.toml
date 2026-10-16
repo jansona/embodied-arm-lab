@@ -27,7 +27,7 @@ embodied-arm = "embodied_arm.runtime.start_so101:main"
 include = ["embodied_arm*"]
 
 [tool.setuptools.package-data]
-embodied_arm = ["assets/so101/*", "assets/so101/assets/*", "web/static/*", "web/static_so101/*"]
+embodied_arm = ["assets/so101/*", "assets/so101/assets/*", "web/static/*", "web/static_so101/*", "web/static_visual/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

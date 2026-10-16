@@ -111,3 +111,21 @@ The symbolic `on:blue` → observer `blue` boundary was independently checked af
 After diagnosis, goal-memory initialization was moved before costly tracker setup while retaining the original capture timestamp and uncertainty. The new-factory HTTP rerun then **passed action-path acceptance**: one vision request, one plan request, four Jev decisions and three physical actions. It stopped during approach with `perception_rejected` / `Moving RGB anchors unavailable`, one stationary retry, no completed symbolic steps and no cycle review. Thus the observer/wrist execution path is active, but a physical 16-call review, successful grasp and stack remain unproven. All provider responses remained MockTransport.
 
 Final independent test set also checks joint-continuity rejection, revised-tail feedback on a second review, release-pending rejection of an old held certificate, and pre-release support motion/carried-object slip. The latter call the real release guard and real gripper driver with synthetic visual estimates; both prevent any Jev request or open command. These are safety/control-contract tests, not physical placement success.
+
+### Full-frame production transport acceptance (2026-10-16 09:14 UTC)
+
+Executed `python -m pytest -q -s tests/e2e_conversation/test_production_http_loop.py`:
+1 passed in 180.63s, including bounded mock-worker expiry. Native simulation uses
+1920×1440 observer/wrist images; the provider receives downscaled **whole** 4:3
+frames under its existing 1024-pixel boundary. Application services, Qwen parsers,
+Jev IPC worker/adapter and physics are real; model HTTP replies remain MOCK.
+Result: vision 1, brain 1, Jev 3 calls, 2 physical actions, then failed/unverified
+at pick approach. Both first and retry errors were `Semantic identity lease expired`.
+One stationary observation retry, zero completed steps and zero cycle reviews.
+Measured progress contained two image observations; x error reduced from about
+19.9mm to11.9mm. This demonstrates physical action routing, not grasp/task success.
+An earlier attempt was blocked by an incorrect new test assertion expecting native
+resolution at the downsampled model boundary; that fixture assertion was corrected
+without changing production resizing. The corrected run started only after the
+first worker expired. No live provider or browser acceptance was run.
+Recovery and full-frame refinement contracts separately passed:38 tests in26.79s.

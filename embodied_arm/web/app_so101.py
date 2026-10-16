@@ -72,8 +72,7 @@ class SO101Session:
                     'perception_resolution':list(getattr(self.sim,'camera_size',())),
                     'preview_resolution':[640,480] if hasattr(self.sim,'capture_preview_frames') else None,
                     'illumination_profile':getattr(self.sim,'illumination_profile','unspecified'),
-                    'refinement_profile':perception.get('refinement_profile'),
-                    'roi_tracking':perception.get('roi_tracking',False)},
+                    'processing':'full_frame'},
                 'perception':{**perception,'configured':bool(vision.get('available',vision.get('configured',False))),
                     'status':'ready' if fresh else perception.get('reason','unconfigured'),
                     'model':vision.get('model','qwen3.8-max'),'provenance':(perception.get('last_vision') or {}).get('provenance','none'),
@@ -215,7 +214,7 @@ def create_app(sim_factory=None,vision=None,brain=None,source_factory=None,contr
             selected_executor_factory=simulation_task_executor
             if source_factory is None:
                 from embodied_arm.control.so101_control import CameraSceneSource
-                selected_source_factory=lambda sim,vision:CameraSceneSource(sim,vision=vision,refine_rgb=True,refinement_profile='scaled',roi_tracking=True)
+                selected_source_factory=lambda sim,vision:CameraSceneSource(sim,vision=vision,refine_rgb=True,refinement_profile='scaled')
         session=SO101Session(factory(seed=0),vision=vision_client,brain=brain_client,source_factory=selected_source_factory,controller=controller_client,enable_waypoint=enable_waypoint,executor_factory=executor_factory,task_executor=task_executor,task_executor_factory=selected_executor_factory,camera_interval_seconds=camera_interval_seconds);session.sim.stop();app.state.session=session
         session.camera.start()
         def physics():

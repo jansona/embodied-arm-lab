@@ -28,6 +28,7 @@ class VisualManipulationExecutor:
         self.experimental_simulation=bool(experimental_simulation)
         self.sim = simulation
         self.observer = observer
+        self.max_observation_age_s=getattr(observer,"max_observation_age_s",3.)
         self.driver = driver
         self.clock = clock
         self.max_calls = max_calls
@@ -92,7 +93,7 @@ class VisualManipulationExecutor:
             candidate=None
             if state=='held_verified' and not unsafe_phase:
                 candidate=remember_verified_hold(self.held_evidence,self._verified_lift_snapshot,
-                                                 holding_state=state)
+                                                 holding_state=state,max_age_s=self.max_observation_age_s)
             elif self._historical_held_candidate is not None and run is None and self._stopped_robot is not None:
                 try:
                     before=robot_only(self.sim.proprioception())
@@ -152,7 +153,7 @@ class VisualManipulationExecutor:
             fresh=self.observer.prepare_hold_reacquisition(candidate.object_id)
             verdict=verify_stopped_hold(candidate,fresh,stopped_robot=stopped,
                 current_robot=robot_only(self.sim.proprioception()),stopped_at=stopped_at,
-                now=self.clock(),holding_state='held_verified')
+                now=self.clock(),holding_state='held_verified',max_age_s=self.max_observation_age_s)
             if not verdict['verified']:return verdict
             with self._holding_lock:
                 if generation!=self._holding_generation:return {**failed,'reason':'holding_reacquisition_cancelled'}
@@ -455,7 +456,7 @@ class VisualManipulationExecutor:
         retreated=yield {'kind':'observe','phase':'verify_release'}
         if support_id:
             from embodied_arm.control.stack_verification import verify_stack_release
-            feedback=verify_stack_release(before,released,retreated,obj,support_id,now=self.clock(),lease_seconds=getattr(self.observer,'lease_seconds',120))
+            feedback=verify_stack_release(before,released,retreated,obj,support_id,now=self.clock(),lease_seconds=getattr(self.observer,'lease_seconds',120),max_age_s=self.max_observation_age_s)
         else:feedback=self.observer.verify_release(before,released,retreated,obj,list(goal.xyz))
         if feedback.get('verified') is not True:raise ValueError('release_not_visually_verified')
         with self._holding_lock:
@@ -498,7 +499,7 @@ class VisualManipulationExecutor:
         if robot['busy'] or not robot['paused']:
             raise ValueError('observation_during_motion')
         scene = EstimatedScene.from_dict(snapshot['scene'])
-        point = scene.require(object_id, now=self.clock(), max_age_s=3)
+        point = scene.require(object_id, now=self.clock(), max_age_s=self.max_observation_age_s)
         if point.position_std_m > 0.003:
             raise ValueError('visual_uncertainty')
         return point
@@ -506,7 +507,7 @@ class VisualManipulationExecutor:
     def _check_path(self, snapshot, object_id, target):
         robot = robot_only(snapshot['robot'])
         scene = EstimatedScene.from_dict(snapshot['scene'])
-        other = scene.require('blue' if object_id == 'red' else 'red', now=self.clock(), max_age_s=3)
+        other = scene.require('blue' if object_id == 'red' else 'red', now=self.clock(), max_age_s=self.max_observation_age_s)
         if other.position_std_m > 0.003:
             raise ValueError('unknown_obstacle')
         start = robot['ee']
@@ -541,6 +542,6 @@ def simulation_task_executor(simulation, source, controller):
     from embodied_arm.perception.phase_observer import PhaseSceneObserver
     from embodied_arm.control.jev_motion import JevMotionDriver
     from embodied_arm.services.sequence_execution import SequenceExecutionService
-    primitive=VisualManipulationExecutor(simulation=simulation,observer=PhaseSceneObserver(source),
-        driver=JevMotionDriver(simulation,controller),experimental_simulation=True,max_calls=200,max_seconds=420)
+    primitive=VisualManipulationExecutor(simulation=simulation,observer=PhaseSceneObserver(source,semantic_lease_s=420.),
+        driver=JevMotionDriver(simulation,controller,max_observation_age_s=getattr(source,"max_observation_age_s",3.)),experimental_simulation=True,max_calls=200,max_seconds=420)
     return SequenceExecutionService(primitive)

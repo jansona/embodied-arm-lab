@@ -20,12 +20,12 @@ def test_actual_rgb_phase_initialization_never_reads_oracle(monkeypatch):
         assert not observer.validated # physical manipulation evidence still pending
     finally:sim.close()
 
-def test_shadow_free_rgb_v1_high_resolution_roi_meets_precision_floor(monkeypatch):
+def test_shadow_free_rgb_v1_high_resolution_full_frame_meets_precision_floor(monkeypatch):
     from embodied_arm.perception.so101_uncertainty import axis_bands
     sim=SO101Simulation(seed=0,camera_size=(1920,1440),illumination_profile='shadow_free_rgb_v1')
     try:
         monkeypatch.setattr(sim,'evaluation_state',lambda:(_ for _ in ()).throw(AssertionError('Oracle forbidden')))
-        source=CameraSceneSource(sim,vision=RGBColourFixture(),refine_rgb=True,refinement_profile='scaled',roi_tracking=True)
+        source=CameraSceneSource(sim,vision=RGBColourFixture(),refine_rgb=True,refinement_profile='scaled')
         source.refresh();observer=PhaseSceneObserver(source)
         current=observer.begin_phase('approach','red')
         for name in ('red','blue'):
@@ -52,11 +52,12 @@ def test_goal_memory_recorded_before_slow_tracker_setup(monkeypatch):
         def __init__(self,**kwargs):pass
         def start(self,*args,**kwargs):return SimpleNamespace(accepted=True)
     monkeypatch.setattr('embodied_arm.perception.phase_observer.RGBRegionTracker',Tracker)
-    observer=PhaseSceneObserver(source,clock=lambda:now[0])
+    observer=PhaseSceneObserver(source,clock=lambda:now[0],semantic_lease_s=420.)
     def slow_setup(required):now[0]+=5.
     monkeypatch.setattr(observer,'_start_static',slow_setup)
     monkeypatch.setattr(observer,'observe',lambda:observer.latest)
     observer.begin_phase('approach','red')
+    assert observer.goal_memory.max_age_s==120.
     record=observer.goal_memory.read({'epoch':7},frames,now=now[0])
     assert record['captured_at']==100. and now[0]>103.
     assert record['estimate']['covariance_m2']==snapshot['scene']['objects']['goal']['covariance_m2']
@@ -133,3 +134,26 @@ def test_first_rgb_fault_survives_secondary_retry_error(monkeypatch):
         assert first['fits']==[detail]
         observer.cancel();assert observer.last_failure_details is None
     finally:sim.close()
+
+
+def test_task_bounded_phase_lease_expires_without_capture_or_restamp(monkeypatch):
+    from types import SimpleNamespace
+    import embodied_arm.perception.phase_observer as module
+    robot={'epoch':7}
+    monkeypatch.setattr(module,'robot_only',lambda value:value)
+    source=SimpleNamespace(sim=SimpleNamespace(proprioception=lambda:robot))
+    observer=PhaseSceneObserver(source,clock=lambda:521.,semantic_lease_s=420.)
+    assert observer.lease_seconds==420. and observer.max_frames==120
+    assert PhaseSceneObserver(source).lease_seconds==120.
+    observer.latest={'robot':robot};observer.semantic_at=100.
+    with pytest.raises(ValueError,match='Semantic identity lease expired'):observer.observe()
+    assert observer.semantic_at==100.
+    observer.cancel()
+    with pytest.raises(ValueError,match='Phase not initialized'):observer.observe()
+
+
+@pytest.mark.parametrize('lease',[0,421,True,None,float('nan')])
+def test_phase_identity_lease_is_explicitly_bounded(lease):
+    from types import SimpleNamespace
+    with pytest.raises(ValueError,match='bounded semantic lease'):
+        PhaseSceneObserver(SimpleNamespace(sim=SimpleNamespace()),semantic_lease_s=lease)

@@ -138,10 +138,11 @@ def test_primary_entry_executes_and_preview_is_explicitly_auxiliary():
 def test_camera_profile_discloses_actual_perception_vs_preview_resolution():
     source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
     helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
-    packet={'status':'ready','perception_resolution':[1920,1440],'preview_resolution':[640,480],'illumination_profile':'shadow_free_rgb_v1','roi_tracking':True}
+    packet={'status':'ready','perception_resolution':[1920,1440],'preview_resolution':[640,480],'illumination_profile':'shadow_free_rgb_v1','processing':'full_frame'}
     value=json.loads(subprocess.check_output(['node','-e',helper+'\nconsole.log(JSON.stringify(formatCameraStatus('+json.dumps(packet)+')));'],text=True))
     assert '识别 1920×1440 / 预览 640×480' in value
-    assert 'shadow_free_rgb_v1' in value and 'CPU' in value and 'ROI' in value
+    assert 'shadow_free_rgb_v1' in value and 'CPU' in value and '整帧图像感知（不裁剪）' in value
+    assert 'ROI 本地跟踪' not in value
 
 
 def test_terminal_outcome_preserves_actual_failure_and_counts():
@@ -260,3 +261,23 @@ def test_bounded_visual_failure_evidence_identifies_object_camera_without_raw_du
     assert 'roi_bounds' not in values[0] and '红色方块' not in values[0]
     assert '场景未重置' in values[1] and '无法确认' in values[1]
     assert all('rejected' not in value for value in values[2:])
+
+
+def test_full_frame_processing_label_requires_backend_evidence():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    code=helper+"\nconsole.log(JSON.stringify([formatCameraProfile({processing:'full_frame'}),formatCameraProfile({roi_tracking:true}),formatCameraProfile({})]));"
+    values=json.loads(subprocess.check_output(['node','-e',code],text=True))
+    assert '整帧图像感知（不裁剪）' in values[0]
+    assert values[1]==values[2]==''
+    assert 'camera.roi_tracking' not in source
+
+
+def test_paused_observation_age_limit_is_actual_optional_configuration():
+    source=(Path(__file__).parent.parent/'embodied_arm/web/static_so101/ui.js').read_text()
+    helper=source[source.index('function formatTaskError'):source.index('function render(s)')]
+    code=helper+"\nconsole.log(JSON.stringify([formatObservationAgeLimit({processing:'full_frame'},{max_observation_age_s:30}),formatObservationAgeLimit({processing:'full_frame'},{max_observation_age_s:12}),formatObservationAgeLimit({processing:'full_frame'},{}),formatObservationAgeLimit({},{max_observation_age_s:30})]));"
+    values=json.loads(subprocess.check_output(['node','-e',code],text=True))
+    assert '上限 30 秒' in values[0] and '场景一致性检查' in values[0]
+    assert '上限 12 秒' in values[1]
+    assert values[2]==values[3]==''

@@ -68,13 +68,14 @@ def _same_robot(left, right):
             and abs(left['gripper_angle']-right['gripper_angle']) <= .01)
 
 
-def _observation(snapshot, object_id, now):
+def _observation(snapshot, object_id, now, max_age_s=_MAX_AGE_S):
     """Validate image/encoder provenance, without guessing missing landmarks."""
+    if not _finite(max_age_s) or not 1<=max_age_s<=60:raise ValueError('invalid_observation_age')
     obs = _from_snapshot(snapshot)
     robot = _robot(snapshot['robot'])
     scene = obs.scene
     if (not _finite(now) or not scene.captured_at <= scene.estimated_at <= now
-            or not 0 <= now-scene.captured_at <= _MAX_AGE_S):
+            or not 0 <= now-scene.captured_at <= max_age_s):
         raise ValueError('stale_rgb')
     if (not isinstance(obs.phase_id, str) or not obs.phase_id
             or not isinstance(obs.identity_token, str) or not obs.identity_token
@@ -92,12 +93,12 @@ def _observation(snapshot, object_id, now):
     if (not 0 <= scene.captured_at-obs.semantic_captured_at <= _MAX_HISTORY_S
             or obs.source == 'semantic_rgb' and obs.semantic_captured_at != scene.captured_at):
         raise ValueError('expired_semantic_identity')
-    _visible_point(obs, object_id, now)
+    _visible_point(obs, object_id, now, max_age_s)
     return obs, robot
 
 
-def _visible_point(obs, object_id, now):
-    point = obs.scene.require(object_id, now=now, max_age_s=_MAX_AGE_S)
+def _visible_point(obs, object_id, now, max_age_s=_MAX_AGE_S):
+    point = obs.scene.require(object_id, now=now, max_age_s=max_age_s)
     if point.confidence < _MIN_CONFIDENCE or point.position_std_m > _MAX_STD_M:
         raise ValueError('uncertain_landmark')
     selected = [d for d in obs.detections if d.object_id == object_id]
@@ -113,7 +114,7 @@ def _fresh_semantic_reacquisition(snapshot, obs, candidate, stopped, stopped_at)
     """Keep slow semantic inference tied to its real frame, never restamp it.
 
     The observer may use a subsequent locally tracked RGB frame for the strict
-    three-second geometry lease, provided the original semantic refresh was
+    configured bounded geometry lease, provided the original semantic refresh was
     also captured after Stop with no intervening commanded robot action.
     """
     record = snapshot['visual_evidence'].get('semantic_reacquisition')
@@ -133,7 +134,7 @@ def _fresh_semantic_reacquisition(snapshot, obs, candidate, stopped, stopped_at)
     return True
 
 
-def remember_verified_hold(certificate, verified_snapshot, *, holding_state='held_verified'):
+def remember_verified_hold(certificate, verified_snapshot, *, holding_state='held_verified', max_age_s=_MAX_AGE_S):
     """Copy only a certificate-matched verified lift into historical storage.
 
     Call with the snapshot that originally produced the successful lift proof,
@@ -149,7 +150,7 @@ def remember_verified_hold(certificate, verified_snapshot, *, holding_state='hel
             return None
         object_id = certificate['object_id']
         obs, robot = _observation(verified_snapshot, object_id,
-                                  verified_snapshot['scene']['estimated_at'])
+                                  verified_snapshot['scene']['estimated_at'],max_age_s)
         if (any(certificate[k] != robot[k] for k in ('epoch', 'actions'))
                 or any(type(certificate[k]) is not int for k in ('epoch', 'actions'))
                 or certificate['identity_token'] != obs.identity_token
@@ -169,7 +170,7 @@ def remember_verified_hold(certificate, verified_snapshot, *, holding_state='hel
 
 
 def verify_stopped_hold(candidate, fresh_snapshot, *, stopped_robot, current_robot,
-                        stopped_at, now, holding_state='held_verified'):
+                        stopped_at, now, holding_state='held_verified', max_age_s=_MAX_AGE_S):
     """Return a fresh handoff certificate only after all continuity gates pass.
 
     stopped_robot is captured immediately after Stop; current_robot is read
@@ -197,7 +198,7 @@ def verify_stopped_hold(candidate, fresh_snapshot, *, stopped_robot, current_rob
         if (stopped['epoch'] <= candidate.epoch or stopped['actions'] < candidate.actions
                 or not _same_robot(stopped, current)):
             return reject('robot_changed_since_stop')
-        obs, observed_robot = _observation(fresh_snapshot, candidate.object_id, now)
+        obs, observed_robot = _observation(fresh_snapshot, candidate.object_id, now,max_age_s)
         if not _same_robot(observed_robot, stopped) or not _same_robot(observed_robot, current):
             return reject('robot_changed_during_capture')
         if (obs.scene.captured_at <= stopped_at
@@ -224,8 +225,8 @@ def verify_stopped_hold(candidate, fresh_snapshot, *, stopped_robot, current_rob
                 + _SIGMA*(point.position_std_m+obs.tcp_std_m) > .05):
             return reject('object_tcp_relation_changed_or_uncertain')
         try:
-            table = _visible_point(obs, 'goal', now)
-            support = _visible_point(obs, 'blue' if candidate.object_id == 'red' else 'red', now)
+            table = _visible_point(obs, 'goal', now,max_age_s)
+            support = _visible_point(obs, 'blue' if candidate.object_id == 'red' else 'red', now,max_age_s)
         except (ValueError, KeyError, TypeError):
             return reject('support_clearance_unobserved')
         # Orientation is not observed. The farthest cube vertex from the

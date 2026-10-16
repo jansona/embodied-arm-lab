@@ -79,38 +79,29 @@ class SO101Simulation:
                     if k=='right' and self.camera_profile=='observer_wrist'
                     else camera_calibration(k,width,height) for k in CAMERAS]
 
-    def _rgb(self,camera_id,roi=None,render_size=None,calibration=None):
+    def _rgb(self,camera_id,render_size=None,calibration=None):
         width,height=render_size or self.camera_size
         calibration=calibration or next(c for c in self.camera_calibrations((width,height)) if c['camera_id']==camera_id)
         pose=np.asarray(calibration['world_from_camera']);eye=pose[:3,3]
         view=p.computeViewMatrix(eye,eye+pose[:3,2],-pose[:3,1])
         fov=math.degrees(2*math.atan(height/(2*calibration['fy'])))
         proj=p.computeProjectionMatrixFOV(fov,width/height,.01,2.)
-        native_width,native_height=width,height
-        if roi is not None:
-            from embodied_arm.perception.rgb_roi_geometry import frustum
-            proj=p.computeProjectionMatrix(*frustum(roi,width,height,fov=fov));width=roi[2]-roi[0];height=roi[3]-roi[1]
         pixels=self.call(p.getCameraImage,width,height,viewMatrix=view,projectionMatrix=proj,
                          renderer=p.ER_TINY_RENDERER,flags=p.ER_NO_SEGMENTATION_MASK,shadow=int(self.illumination_profile=="standard"))[2]
         rgb=np.asarray(pixels,dtype=np.uint8).reshape(height,width,4)[:,:,:3]
-        if roi is not None:
-            canvas=np.zeros((native_height,native_width,3),dtype=np.uint8)
-            canvas[roi[1]:roi[3],roi[0]:roi[2]]=rgb;rgb=canvas
         out=BytesIO();Image.fromarray(rgb).save(out,format='JPEG',quality=92)
         return out.getvalue()
-    def capture_frames(self,*,roi_bounds=None,render_size=None):
+    def capture_frames(self,*,render_size=None):
         with self.lock:
             size=tuple(render_size or self.camera_size)
             if size not in ((640,480),(1280,960),(1920,1440)):raise ValueError('Unsupported stereo resolution')
-            if roi_bounds is not None and render_size is not None:raise ValueError('ROI uses native calibration')
-            if roi_bounds is not None and set(roi_bounds)!=set(CAMERAS):raise ValueError('Both stereo crop bounds required')
             frame_id=uuid.uuid4().hex;captured_at=time.monotonic();images=[]
             calibrations=self.camera_calibrations(size)
             for camera_id in CAMERAS:
-                jpeg=self._rgb(camera_id,None if roi_bounds is None else roi_bounds[camera_id],render_size=size,calibration=next(c for c in calibrations if c['camera_id']==camera_id))
+                jpeg=self._rgb(camera_id,render_size=size,calibration=next(c for c in calibrations if c['camera_id']==camera_id))
                 images.append({'camera_id':camera_id,'width':size[0],'height':size[1],
                                'data_url':'data:image/jpeg;base64,'+base64.b64encode(jpeg).decode('ascii')})
-                if roi_bounds is None:self._renders[camera_id]=(time.monotonic(),jpeg)
+                self._renders[camera_id]=(time.monotonic(),jpeg)
             packet={'frame_id':frame_id,'captured_at':captured_at,'images':images,
                     'calibrations':calibrations,
                     'camera_profile':self.camera_profile,
@@ -118,7 +109,6 @@ class SO101Simulation:
                         'role':'wrist' if self.camera_profile=='observer_wrist' and c['camera_id']=='right' else 'observer',
                         'extrinsics_source':'joint_encoder_fk_rigid_mount' if self.camera_profile=='observer_wrist' and c['camera_id']=='right' else 'fixed_calibration',
                         'calibration':deepcopy(c)} for c in calibrations]}
-            if roi_bounds is not None:packet.update(capture_profile='native_coordinate_roi_canvas',observed_roi_bounds=roi_bounds)
             return packet
     def capture_preview_frames(self):
         # Same two cameras/FOV, cheaper display frames. Perception keeps native calibration.
@@ -144,10 +134,16 @@ class SO101Simulation:
                 goal=list(values) if isinstance(values,(list,tuple)) else []
                 if len(goal)!=5 or max(abs(a-b) for a,b in zip(goal,self.robot.joint_positions()))>.150001:raise ValueError('Joint jog exceeds0.15rad')
                 if not all(math.isfinite(q) and lo<=q<=hi for q,lo,hi in zip(goal,self.robot.lower_limits,self.robot.upper_limits)):raise ValueError('Joint limit')
+            elif action=='gripper':
+                if type(values) not in (int,float) or not math.isfinite(values) or not 0<=values<=1:
+                    raise ValueError('Invalid gripper target')
+                current=float(self.robot.proprioception()['gripper_openness'])
+                if abs(values-current)>.100001:raise ValueError('Gripper increment exceeds10percent')
+                goal=None
             elif action in ('open','close'):goal=None
             else:raise ValueError('Unsupported SO101 command')
-            self.queue.append({'joint_goal':goal,'gripper':1. if action=='open' else 0. if action=='close' else None,
-                               'ticks':360 if action in ('open','close') else 144,
+            self.queue.append({'joint_goal':goal,'gripper':float(values) if action=='gripper' else 1. if action=='open' else 0. if action=='close' else None,
+                               'ticks':360 if action in ('open','close','gripper') else 144,
                                'settle_ticks':120 if action=='xyz' else 0,'elapsed':0,'origin':origin})
             self.actions+=1
     def resume(self):

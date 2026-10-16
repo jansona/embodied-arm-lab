@@ -335,8 +335,10 @@ class DynamicRGBPhaseTracker:
     failure invalidates this tracker; caller may acquire ONE semantic refresh
     through VisualPhaseVerifier without changing its original phase identity.
     """
-    def __init__(self, *, profile='baseline', max_residual_px=12., semantic_lifetime_s=30., moving_wrist=False):
-        if not 0 < semantic_lifetime_s <= 120:raise ValueError('Invalid bounded semantic lease')
+    def __init__(self, *, profile='baseline', max_residual_px=12., semantic_lifetime_s=30., moving_wrist=False,max_observation_age_s=3.):
+        if not 0 < semantic_lifetime_s <= 420:raise ValueError('Invalid bounded semantic lease')
+        if type(max_observation_age_s) not in (int,float) or not math.isfinite(max_observation_age_s) or not 1<=max_observation_age_s<=60:raise ValueError('Invalid observation age budget')
+        self.max_observation_age_s=float(max_observation_age_s)
         self.moving_wrist=bool(moving_wrist)
         self.semantic_lifetime_s=float(semantic_lifetime_s)
         if profile not in ('baseline', 'scaled'):
@@ -368,7 +370,7 @@ class DynamicRGBPhaseTracker:
     def start(self, observation: VisualObservation, frames, *, object_id: str, now: float):
         from embodied_arm.perception.camera_perception import RGBFrame
         self.active = False
-        validator = VisualPhaseVerifier(VerificationConfig(max_semantic_age_s=self.semantic_lifetime_s))
+        validator = VisualPhaseVerifier(VerificationConfig(max_age_s=self.max_observation_age_s,max_semantic_age_s=self.semantic_lifetime_s))
         validator._object_id = object_id
         obj = validator._validate(observation, now)
         if (len(frames) != 2 or any(not isinstance(f, RGBFrame) for f in frames)
@@ -400,7 +402,7 @@ class DynamicRGBPhaseTracker:
         if (len(frames) != 2 or any(not isinstance(f, RGBFrame) for f in frames)
                 or {f.camera_id for f in frames} != set(self._calibrations)):
             return fail('invalid_rgb_frames')
-        if (not all(0 <= now-f.captured_at <= 3 for f in frames)
+        if (not all(0 <= now-f.captured_at <= self.max_observation_age_s for f in frames)
                 or max(f.captured_at for f in frames)-min(f.captured_at for f in frames) > .05
                 or any(abs(tcp_captured_at-f.captured_at) > .05 for f in frames)
                 or now-self._base.semantic_captured_at > self.semantic_lifetime_s):
@@ -451,7 +453,7 @@ class DynamicRGBPhaseTracker:
         if (len(frames) != 2 or any(not isinstance(f, RGBFrame) for f in frames)
                 or {f.camera_id for f in frames} != set(self._calibrations)):
             return fail('invalid_rgb_frames')
-        if (not all(0 <= now-f.captured_at <= 3 for f in frames)
+        if (not all(0 <= now-f.captured_at <= self.max_observation_age_s for f in frames)
                 or max(f.captured_at for f in frames)-min(f.captured_at for f in frames) > .05
                 or any(abs(tcp_captured_at-f.captured_at) > .05 for f in frames)
                 or now-self._base.semantic_captured_at > self.semantic_lifetime_s):
@@ -480,9 +482,9 @@ class DynamicRGBPhaseTracker:
             detections.append(PixelDetection(self._object,frame.camera_id,frame.frame_id,
                 face.uv,self._base.association_confidence,face.pixel_sigma_px))
         scene = estimate_scene(tuple(frames), tuple(detections), now=now, workspace=workspace,
-            config=PerceptionConfig(max_frame_age_s=3.,max_position_std_m=.005,max_ray_separation_m=.006))
+            config=PerceptionConfig(max_frame_age_s=self.max_observation_age_s,max_position_std_m=.005,max_ray_separation_m=.006))
         try:
-            current = scene.require(self._object,now=now)
+            current = scene.require(self._object,now=now,max_age_s=self.max_observation_age_s)
         except ValueError:
             return fail('closure_stereo_uncertain')
         initial = self._base.scene.objects[self._object]

@@ -88,10 +88,12 @@ class RGBRegionTracker:
     tuple. required_objects is fixed at start; nonrequired points are never cached
     or returned for control, even if the initial full-scene refinement found them.
     """
-    def __init__(self, *, clock: Callable[[], float] | None = None, refinement_profile="baseline", semantic_lifetime_s=SEMANTIC_LIFETIME_S, max_tracking_frames=MAX_TRACKING_FRAMES, moving_wrist=False):
+    def __init__(self, *, clock: Callable[[], float] | None = None, refinement_profile="baseline", semantic_lifetime_s=SEMANTIC_LIFETIME_S, max_tracking_frames=MAX_TRACKING_FRAMES, moving_wrist=False, max_observation_age_s=MAX_CURRENT_FRAME_AGE_S):
         if refinement_profile not in ("baseline","scaled"):raise ValueError("Unknown RGB refinement profile")
-        if not 0 < semantic_lifetime_s <= 120 or type(max_tracking_frames) is not int or not 1 <= max_tracking_frames <= 120:raise ValueError('Invalid bounded tracking lease')
-        self.moving_wrist=bool(moving_wrist);self._geometry=None;self._capture_roi_bounds=None
+        if not 0 < semantic_lifetime_s <= 420 or type(max_tracking_frames) is not int or not 1 <= max_tracking_frames <= 120:raise ValueError('Invalid bounded tracking lease')
+        if type(max_observation_age_s) not in (int,float) or not math.isfinite(max_observation_age_s) or not 1<=max_observation_age_s<=60:raise ValueError('Invalid observation age budget')
+        self.max_observation_age_s=float(max_observation_age_s)
+        self.moving_wrist=bool(moving_wrist);self._geometry=None
         self.semantic_lifetime_s=float(semantic_lifetime_s);self.max_tracking_frames=max_tracking_frames
         self.refinement_profile=refinement_profile
         self.initial_source=INITIAL_SOURCE if refinement_profile=="baseline" else "hybrid_qwen_region_rgb_geometry_scaled"
@@ -107,16 +109,13 @@ class RGBRegionTracker:
     def _refine(self,packet,detections):
         if self.refinement_profile=='scaled':
             from embodied_arm.perception.rgb_scaled_refinement import refine_packet as scaled_refine
-            result=(scaled_refine(packet,detections,expand_clipped=True,capture_roi_bounds=self._capture_roi_bounds,expanded_camera_ids=('right',))
-                    if self.moving_wrist else scaled_refine(packet,detections))
+            result=scaled_refine(packet,detections)
         else:result=refine_packet(packet,detections)
         visible=[d for d in detections if d.visibility=='visible']
         self.last_fit_details=[{'object_id':d.object_id,'camera_id':d.camera_id,
             'reason':e.reason,'accepted':bool(e.accepted),'roi_bounds':list(e.roi_bounds),
             'uv':list(e.uv) if e.uv is not None else None,
-            'coarse_uv':list(e.coarse_uv) if e.coarse_uv is not None else None,
-            'search_expanded':bool(getattr(e,'search_expanded',False)),
-            'initial_roi_bounds':getattr(e,'initial_roi_bounds',None)}
+            'coarse_uv':list(e.coarse_uv) if e.coarse_uv is not None else None}
             for d,e in zip(visible,result.evidence)][:6]
         return result
 
@@ -133,7 +132,7 @@ class RGBRegionTracker:
                       'profile': 'static_hover_only', 'source': self.tracked_source,
                       'semantic_lifetime_s': self.semantic_lifetime_s,
                       'max_tracking_frames': self.max_tracking_frames,
-                      'max_current_frame_age_s': MAX_CURRENT_FRAME_AGE_S,
+                      'max_current_frame_age_s': self.max_observation_age_s,
                       'max_initial_anchor_drift_px': MAX_INITIAL_ANCHOR_DRIFT_PX}
             if session is not None:
                 result.update(epoch=session.epoch, semantic_frame_id=session.semantic_frame_id,
@@ -179,9 +178,8 @@ class RGBRegionTracker:
 
     def start(self, packet: dict, canonical_ai_detections: Sequence[PixelDetection], epoch: int,
               *, now: float | None = None,
-              required_objects: Sequence[str] = ('red', 'blue', 'goal'), calibrations=None, capture_roi_bounds=None) -> RefinedPacket:
+              required_objects: Sequence[str] = ('red', 'blue', 'goal'), calibrations=None) -> RefinedPacket:
         with self._lock:
-            self._capture_roi_bounds=capture_roi_bounds
             # A new semantic start replaces any prior lease even if it fails.
             self._session = None
             if type(epoch) is not int or epoch < 0:
@@ -245,9 +243,8 @@ class RGBRegionTracker:
         if not compatible_calibrations(original,current,moving_wrist=True):raise ValueError('Camera calibration changed')
         return reproject_detections(self._session.anchors,points,current)
 
-    def track(self, packet: dict, epoch: int, *, now: float | None = None, calibrations=None, capture_roi_bounds=None) -> RefinedPacket:
+    def track(self, packet: dict, epoch: int, *, now: float | None = None, calibrations=None) -> RefinedPacket:
         with self._lock:
-            self._capture_roi_bounds=capture_roi_bounds
             session = self._session
             if session is None:
                 return self._fail('no_active_semantic_session')
@@ -266,7 +263,7 @@ class RGBRegionTracker:
                 return self._fail('semantic_expired')
             if session.tracked_frames >= self.max_tracking_frames:
                 return self._fail('tracking_frame_budget')
-            if stamp-snapshot['captured_at'] > MAX_CURRENT_FRAME_AGE_S:
+            if stamp-snapshot['captured_at'] > self.max_observation_age_s:
                 return self._fail('stale_current_frame')
             if _dimensions(snapshot) != session.dimensions:
                 return self._fail('camera_layout_changed')
@@ -318,7 +315,7 @@ class RGBRegionTracker:
                 return self._fail('clock_moved_backwards')
             if completed_at-session.semantic_captured_at >= self.semantic_lifetime_s:
                 return self._fail('semantic_expired', evidence=evidence)
-            if completed_at-snapshot['captured_at'] > MAX_CURRENT_FRAME_AGE_S:
+            if completed_at-snapshot['captured_at'] > self.max_observation_age_s:
                 return self._fail('stale_current_frame', evidence=evidence)
             self._session = replace(session, last_frame_id=snapshot['frame_id'],
                                     last_captured_at=snapshot['captured_at'], last_checked_at=completed_at,

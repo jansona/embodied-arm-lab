@@ -28,10 +28,12 @@ def robot_only(raw):
 
 
 class CameraSceneSource:
-    def __init__(self,simulation,vision=None,clock=time.monotonic,refine_rgb=False,refinement_profile="baseline",roi_tracking=False):
+    def __init__(self,simulation,vision=None,clock=time.monotonic,refine_rgb=False,refinement_profile="baseline",max_observation_age_s=30.):
         if refinement_profile not in ("baseline","scaled"):raise ValueError("Unknown refinement profile")
+        if type(max_observation_age_s) not in (int,float) or not math.isfinite(max_observation_age_s) or not 1<=max_observation_age_s<=60:raise ValueError('Invalid observation age budget')
+        self.max_observation_age_s=float(max_observation_age_s)
         self.moving_wrist=getattr(simulation,'camera_profile','legacy_fixed_stereo')=='observer_wrist'
-        self.refinement_profile=refinement_profile;self.roi_tracking=bool(roi_tracking);self.tracking_rois=None
+        self.refinement_profile=refinement_profile
         self.sim=simulation;self.vision=vision;self.clock=clock;self.refine_rgb=bool(refine_rgb)
         self.lock=threading.RLock();self.generation=0;self.scene=None;self.epoch=None;self.actions=None
         self.reason='vision_unconfigured';self.pending=False;self.last_vision=None
@@ -47,9 +49,9 @@ class CameraSceneSource:
         with self.lock:
             return {'configured':self.vision is not None,'pending':self.pending,'reason':self.reason,
                     'source':'calibrated_rgb_triangulation','mode':'paused_scene_validation','rgb_refinement_enabled':self.refine_rgb,
-                    'max_position_std_m':MAX_POSITION_STD_M,'frozen_window_seconds':FROZEN_WINDOW_SECONDS,
+                    'max_observation_age_s':self.max_observation_age_s,'max_position_std_m':MAX_POSITION_STD_M,'frozen_window_seconds':FROZEN_WINDOW_SECONDS,
                     'tracking':self.tracker.status() if self.tracker else None,
-                    'refinement_profile':self.refinement_profile,'roi_tracking':self.roi_tracking,'observed_roi_bounds':self.tracking_rois,
+                    'refinement_profile':self.refinement_profile,
                     'last_vision':self.last_vision,'scene':None if self.scene is None else self.scene.to_dict()}
     def refresh(self,required_objects=('red','blue','goal'),*,expected_generation=None):
         scope=tuple(required_objects)
@@ -94,12 +96,7 @@ class CameraSceneSource:
             self.pending=True;generation=self.generation;self.scene=None;self.reason='tracking' if tracking else 'observing'
         failure='rgb_tracking_rejected' if tracking else 'vision_request_failed'
         try:
-            if tracking and self.roi_tracking and self.moving_wrist:
-                from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
-                current=self.sim.camera_calibrations()
-                seeds=self.tracker.projected_seeds(current)
-                self.tracking_rois=bounds_from_detections(current,seeds,self.required_objects,radius_scale=2,expanded_camera_ids=('right',))
-            packet=self.sim.capture_frames(roi_bounds=self.tracking_rois) if tracking and self.tracking_rois else self.sim.capture_frames()
+            packet=self.sim.capture_frames()
             if self.moving_wrist:
                 from embodied_arm.perception.moving_camera_geometry import validate_capture_geometry
                 validate_capture_geometry(packet)
@@ -109,7 +106,7 @@ class CameraSceneSource:
                 if generation!=self.generation:raise ValueError('cancelled')
             if tracking:
                 if not self.moving_wrist and packet['calibrations']!=self.tracker_calibrations:raise ValueError('Camera calibration changed')
-                refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock(),**({'calibrations':packet['calibrations'],'capture_roi_bounds':packet.get('observed_roi_bounds')} if self.moving_wrist else {}))
+                refined=self.tracker.track(vision_packet,before['epoch'],now=self.clock(),**({'calibrations':packet['calibrations']} if self.moving_wrist else {}))
                 self._record_refinement(refined,tracking=True)
                 if not refined.accepted:raise ValueError('RGB tracking rejected')
                 detections=list(refined.detections)
@@ -136,19 +133,15 @@ class CameraSceneSource:
                 detections=list(result.detections)
                 if self.refine_rgb:
                     from embodied_arm.perception.rgb_region_tracker import RGBRegionTracker
-                    self.tracker=(RGBRegionTracker(refinement_profile=self.refinement_profile,moving_wrist=True) if self.moving_wrist
-                        else RGBRegionTracker() if self.refinement_profile=='baseline'
-                        else RGBRegionTracker(refinement_profile=self.refinement_profile))
+                    self.tracker=(RGBRegionTracker(max_observation_age_s=self.max_observation_age_s,refinement_profile=self.refinement_profile,moving_wrist=True) if self.moving_wrist
+                        else RGBRegionTracker(max_observation_age_s=self.max_observation_age_s) if self.refinement_profile=='baseline'
+                        else RGBRegionTracker(max_observation_age_s=self.max_observation_age_s,refinement_profile=self.refinement_profile))
                     failure='rgb_face_refinement_rejected'
-                    refined=self.tracker.start(vision_packet,detections,before['epoch'],now=self.clock(),required_objects=self.required_objects,**({'calibrations':packet['calibrations'],'capture_roi_bounds':packet.get('observed_roi_bounds')} if self.moving_wrist else {}))
+                    refined=self.tracker.start(vision_packet,detections,before['epoch'],now=self.clock(),required_objects=self.required_objects,**({'calibrations':packet['calibrations']} if self.moving_wrist else {}))
                     self._record_refinement(refined,tracking=False)
                     if not refined.accepted:raise ValueError('RGB face refinement rejected')
                     self.tracker_calibrations=packet['calibrations'];self.semantic_deadline=packet['captured_at']+60.
                     detections=list(refined.detections)
-                    if self.roi_tracking:
-                        if not {'red','blue'}.issubset(self.required_objects):raise ValueError('ROI tracking requires both blocks')
-                        from embodied_arm.perception.rgb_roi_geometry import bounds_from_detections
-                        self.tracking_rois=bounds_from_detections(packet['images'],detections,self.required_objects,**({'radius_scale':2,'expanded_camera_ids':('right',)} if self.moving_wrist else {}))
             failure='scene_changed_during_vision'
             after=robot_only(self.sim.proprioception())
             if (generation!=self.generation or not after['paused'] or after['busy']
@@ -160,16 +153,15 @@ class CameraSceneSource:
                 frames.append(RGBFrame.from_jpeg(packet['frame_id'],packet['captured_at'],calibrations[item['camera_id']],jpeg))
             failure='triangulation_rejected'
             scene=estimate_scene(frames,detections,now=self.clock(),workspace=OBSERVATION_VOLUME,
-                 config=PerceptionConfig(max_frame_age_s=3. if tracking else FROZEN_WINDOW_SECONDS,max_position_std_m=MAX_POSITION_STD_M,max_ray_separation_m=.006))
+                 config=PerceptionConfig(max_frame_age_s=self.max_observation_age_s,max_position_std_m=MAX_POSITION_STD_M,max_ray_separation_m=.006))
             rejected={k:v.reason for k,v in scene.objects.items() if not v.valid}
             if rejected:
                 self.last_vision['landmark_rejections']=rejected;failure='landmark_uncertain'
-            for obj in self.required_objects:scene.require(obj,now=self.clock(),max_age_s=3. if tracking else FROZEN_WINDOW_SECONDS)
+            for obj in self.required_objects:scene.require(obj,now=self.clock(),max_age_s=self.max_observation_age_s)
             with self.lock:
                 if generation!=self.generation:raise ValueError('Vision cancelled')
                 self.scene=scene;self.epoch=after['epoch'];self.actions=after['actions'];self.reason='estimated'
                 self.last_rgb_frames=tuple(frames);self.last_pixel_detections=tuple(detections)
-                self.last_capture_roi_bounds=packet.get('observed_roi_bounds')
             return self.snapshot()
         except Exception:
             with self.lock:
@@ -198,7 +190,7 @@ class CameraSceneSource:
             robot=robot_only(self.sim.proprioception())
             if robot['epoch']!=self.epoch or robot['actions']!=self.actions or robot['busy']:raise ValueError('RGB observation invalidated by motion')
             if self.semantic_deadline is not None and self.clock()>=self.semantic_deadline:raise ValueError('Semantic observation expired')
-            for obj in self.required_objects:self.scene.require(obj,now=self.clock(),max_age_s=FROZEN_WINDOW_SECONDS)
+            for obj in self.required_objects:self.scene.require(obj,now=self.clock(),max_age_s=self.max_observation_age_s)
             return {'schema':'so101-camera-observation-v1','source':'rgb_only','required_objects':list(self.required_objects),'detector_provenance':self.last_vision['provenance'],'robot':robot,'scene':self.scene.to_dict()}
     def brain_scene(self):
         snapshot=self.snapshot()

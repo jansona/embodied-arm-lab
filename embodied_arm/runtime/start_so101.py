@@ -26,18 +26,13 @@ def commands(*, live=False, config=None, workers_only=False, port=8766):
         raise ValueError('--config requires --live')
     jobs = []
     if not workers_only:
-        jobs.append(['-m', 'uvicorn', 'embodied_arm.web.app_so101:app', '--host', '127.0.0.1', '--port', str(port)])
+        jobs.append(['-m', 'uvicorn', 'embodied_arm.web.app_visual:app', '--host', '127.0.0.1', '--port', str(port)])
     if live:
         path = Path(config).expanduser().resolve()
         if path == CONFIG_EXCLUSION_ROOT or CONFIG_EXCLUSION_ROOT in path.parents:
             raise ValueError('Configuration must remain outside the project')
-        for script, calls, seconds in [('brain_worker.py', 10, 600),
-                                        ('vision_worker.py', 10, 600),
-                                        ('so101_worker.py', 200, 420)]:
-            jobs.append(['-m', 'embodied_arm.runtime.' + script.removesuffix('.py'), '--config', str(path), '--max-calls', str(calls),
-                         '--max-seconds', str(seconds)])
-            if script == 'brain_worker.py':
-                jobs[-1].extend(['--max-replans', '8'])
+        jobs.append(['-m', 'embodied_arm.runtime.visual_loop_worker', '--config', str(path),
+                     '--max-calls', '200', '--max-seconds', '600'])
     return [[sys.executable, *job] for job in jobs]
 
 
@@ -46,10 +41,9 @@ def main(argv=None):
     parser.add_argument('--live', action='store_true', help='Enable experimental simulator tasks and bounded workers; explicit UI requests may incur provider charges')
     parser.add_argument('--config', help='Existing provider configuration outside this repository')
     parser.add_argument('--workers-only', action='store_true', help='Only workers, when UI already runs in a supported execution context')
-    parser.add_argument('--enable-waypoint', action='store_true', help='Enable experimental image-guided hover; not grasp or stack')
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--camera-interval', type=float, default=1., help='Local RGB capture interval, 0.25..10 seconds; never periodic model calls')
-    parser.add_argument('--cycle-max-calls', type=int, default=32, help='Jev calls per local cycle, 1..200; does not increase shared task/session limits')
+    parser.add_argument('--cycle-max-calls', type=int, default=32, help='Progress review interval, 1..200 actions; no extra model call at review')
     args = parser.parse_args(argv)
     if not 1 <= args.cycle_max_calls <= 200:
         parser.error('--cycle-max-calls must be 1..200')
@@ -66,8 +60,8 @@ def main(argv=None):
         stop = True
     signal.signal(signal.SIGINT, interrupt)
     signal.signal(signal.SIGTERM, interrupt)
-    env = {**os.environ, 'SO101_ENABLE_WAYPOINT': '1' if args.enable_waypoint else '0', 'SO101_CAMERA_INTERVAL':str(args.camera_interval),
-           'SO101_SIMULATION_TASKS':'1' if args.live else '0', 'SO101_CYCLE_MAX_CALLS': str(args.cycle_max_calls)}
+    env = {**os.environ, 'SO101_CAMERA_INTERVAL':str(args.camera_interval),
+           'SO101_VISUAL_LIVE':'1' if args.live else '0', 'SO101_CYCLE_MAX_CALLS': str(args.cycle_max_calls)}
     exit_code = 0
     try:
         for job in jobs:
@@ -75,8 +69,9 @@ def main(argv=None):
         if not args.workers_only:
             print(f'SO101: http://127.0.0.1:{args.port} (loopback only)', flush=True)
         if args.live:
-            print('Live window: Qwen 10 calls/600s (8 reviews); vision 10 calls/600s; Jev 200 calls/420s. No automatic renewal.', flush=True)
-            print(f'Experimental simulator tasks: at most 200 Jev calls/420s per task; local cycles at most {args.cycle_max_calls} calls, at most 8 reviews; runtime guards may stop execution. No physical hardware control.', flush=True)
+            print('Live window: Qwen at most 201 calls; Jev at most 200 calls; session 600s. No automatic renewal.', flush=True)
+            print('Experimental simulator tasks: at most 200 Jev calls/420s per task; full images to Qwen, one Jev-selected action, then fresh images. Completion is Qwen assessment; runtime guards may stop execution. No physical hardware control.', flush=True)
+            print(f'Progress reconsideration every {args.cycle_max_calls} actions, without an extra model call.', flush=True)
         else:
             print('Preview mode: simulator task execution disabled; no inference workers started.', flush=True)
         if args.live:
